@@ -26,9 +26,9 @@ int yes_check(char *val){
 
 char *yesno(uint8_t val){
     if(val == 1){
-        return "yes"
+        return "yes";
     }
-    return "no"
+    return "no";
 }
 
 int method_parse(char *val){
@@ -44,16 +44,14 @@ int method_parse(char *val){
     return -1;
 }
 
-int link_addr(struct listen_ip_ll *current, char *val){
-    while(current != NULL){
-        current = current->next;
-    }
+int link_addr(struct configs_s *configs, char *val){
     struct listen_ip_ll *new_node = malloc(sizeof(struct listen_ip_ll));
     if(new_node == NULL){
         return E_ADDRMALLOC;
     }
-    new_node->next = NULL;
+    new_node->next = configs->addrs;
     memcpy(new_node->addr, val, sizeof(new_node->addr));
+    configs->addrs = new_node;
     return 0;
 }
 
@@ -81,11 +79,11 @@ uint16_t conf_error_check(struct configs_s *configs){
         conf_error |= E_CNFNOMETHS;
     }
 
-    return conf_error
+    return conf_error;
 }
 
 uint16_t parse_configs(struct configs_s *configs){
-    memset(configs, 0, sizeof(configs));
+    memset(configs, 0, sizeof(*configs));
     configs->addrs = NULL;
     FILE *file = fopen("/etc/socksprox.conf", "r");
     if(file == NULL){
@@ -93,8 +91,8 @@ uint16_t parse_configs(struct configs_s *configs){
     }
     
     char line[255];
-    while(fgets(&line, sizeof(line), file) != NULL){
-        char *c = &line;
+    while(fgets(line, sizeof(line), file) != NULL){
+        char *c = line;
         char key[32] = {0};
         char val[255] = {0};
         while(*c == ' ' || *c == '\t'){
@@ -113,7 +111,7 @@ uint16_t parse_configs(struct configs_s *configs){
             }
         }
 
-        while(*c == ' ' || *c == '\t'){
+        while(*c == ' ' || *c == '\t' || *c == '='){
             c++;
         }
         if(*c == '\n' || *c == '\r' || *c == '\0'){
@@ -157,13 +155,13 @@ uint16_t parse_configs(struct configs_s *configs){
             }
         }
         else if(strcmp(key, "listen") == 0){
-            if(link_addr(configs->addrs, val) == E_ADDRMALLOC){
+            if(link_addr(configs, val) == E_ADDRMALLOC){
                 return E_ADDRMALLOC;
             }
         }
     }
 
-    return conf_error_check();
+    return conf_error_check(configs);
 }
 
 void free_config_addrs(struct listen_ip_ll *current){
@@ -180,22 +178,22 @@ int test_configs(void){
     uint16_t ret = parse_configs(&configs);
     if(ret != 0){
         printf("FOUND ERRORS:\n");
-        if(ret & E_CONFIGOPEN){printf("\tCOULDN'T OPEN CONFIG FILE\n")};
-        if(ret & E_ADDRMALLOC){printf("\tERROR ALLOCATING MEMORY\n")};
-        if(ret & E_CNFNOADDRS){printf("\tNO LISTEN ADDRESSES\n")};
-        if(ret & E_CNFNOPORTN){printf("\tNO OR INVALID PORT NUMBER\n")};
-        if(ret & E_CNFNOA_LOG){printf("\tNO PATH TO ACCESS LOG\n")};
-        if(ret & E_CNFNOE_LOG){printf("\tNO PATH TO ERROR LOG\n")};
-        if(ret & E_CNFNOMXCON){printf("\tNO OR INVALID MAXIMUM CONNECTIONS\n")};
-        if(ret & E_CNFNOMETHS){printf("\tNO AUTHENTICATION METHODS\n")};
+        if(ret & E_CONFIGOPEN){printf("\tCOULDN'T OPEN CONFIG FILE\n");};
+        if(ret & E_ADDRMALLOC){printf("\tERROR ALLOCATING MEMORY\n");};
+        if(ret & E_CNFNOADDRS){printf("\tNO LISTEN ADDRESSES\n");};
+        if(ret & E_CNFNOPORTN){printf("\tNO OR INVALID PORT NUMBER\n");};
+        if(ret & E_CNFNOA_LOG){printf("\tNO PATH TO ACCESS LOG\n");};
+        if(ret & E_CNFNOE_LOG){printf("\tNO PATH TO ERROR LOG\n");};
+        if(ret & E_CNFNOMXCON){printf("\tNO OR INVALID MAXIMUM CONNECTIONS\n");};
+        if(ret & E_CNFNOMETHS){printf("\tNO AUTHENTICATION METHODS\n");};
         printf("\n");
     }
 
     printf("Configs:\n");
-    if(ret & E_CONFIGOPEN || ret & E_ADDRMALLOC)(
+    if(ret & E_CONFIGOPEN || ret & E_ADDRMALLOC){
         printf("ERROR WAS FATAL\n");
         return 0;
-    )
+    }
     printf("Listening addresses:\n");
     struct listen_ip_ll *current = configs.addrs;
     if(current == NULL){
@@ -231,7 +229,7 @@ int test_configs(void){
         printf("error\n");
     }
     else{
-        printf("%d\n", configs.max_conns)
+        printf("%d\n", configs.max_conns);
     }
     printf("Method Identifiers:\n");
     if(ret & E_CNFNOMETHS){
@@ -245,9 +243,9 @@ int test_configs(void){
         }
     }
     printf("Allow domain names: %s\n", yesno(configs.allow_domains));
-    printf("Allow connect command: %s\n", yes_check(configs.allow_connect));
+    printf("Allow connect command: %s\n", yesno(configs.allow_connect));
     printf("Allow bind command: %s\n", yesno(configs.allow_bind));
-    printf("Allow udp associate command %s\n", yesno(configs.allow_udpassoc));
+    printf("Allow udp associate command: %s\n", yesno(configs.allow_udpassoc));
     printf("\nEnd Configs\n");
 
     return 0;
