@@ -6,7 +6,7 @@
 #include <sys/types.h>
 #include <netdb.h>
 
-#include "include/config.h"
+#include "config.h"
 
 #define METH_NOAUTH 0x00
 #define METH_GSSAPI 0x01
@@ -238,7 +238,7 @@ int test_configs(void){
     else{
         for(int i = 0; i < sizeof(configs.methods); i++){
             if(configs.methods[i] == 1){
-                printf("\t0x%2x\n", i);
+                printf("\t0x%02x\n", i);
             }
         }
     }
