@@ -56,15 +56,15 @@ const char *server_acc[] = {
     "",
 };
 
-int parse_err(uint8_t *buff, char *log, struct tm *t){
+int parse_err(uint8_t *buff, char *log, size_t log_size, struct tm *t){
     uint16_t code;
     memcpy(&code, &buff[2], sizeof(code));
-    return snprintf(log, sizeof(*log), "%d-%d-%d_%d:%d:%d-%s|%s\n",
+    return snprintf(log, log_size, "%d-%d-%d_%d:%d:%d-%s|%s\n",
                     t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour,
                     t->tm_min, t->tm_sec, levels[buff[1]], server_err[code]);
 }
 
-int parse_acc(uint8_t *buff, char *log, struct tm *t){
+int parse_acc(uint8_t *buff, char *log, size_t log_size, struct tm *t){
     uint16_t code;
     char c_addr[255];
     char p_addr[255];
@@ -100,7 +100,7 @@ int parse_acc(uint8_t *buff, char *log, struct tm *t){
         default:
             p_addr[0] = '\0';
     }
-    return snprintf(log, sizeof(*log), "%d-%d-%d_%d:%d:%d-Client{%s}|Peer{%s}-%s\n",
+    return snprintf(log, log_size, "%d-%d-%d_%d:%d:%d-Client{%s}|Peer{%s}-%s\n",
                     t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour,
                     t->tm_min, t->tm_sec, c_addr, p_addr, code);
 }
@@ -126,10 +126,10 @@ void *logger_th(void *arg){
             int log_len;
             switch(buff[0]){
                 case LOG_TYPE_ERR:
-                    log_len = parse_err(buff, log, &t);
+                    log_len = parse_err(buff, log, sizeof(log), &t);
                     break;
                 case LOG_TYPE_ACC:
-                    log_len = parse_acc(buff, log, &t);
+                    log_len = parse_acc(buff, log, sizeof(log), &t);
                     break;
             }
             switch(buff[0]){
@@ -203,6 +203,10 @@ int open_logs(struct logs_s *logs, char *a_log, char *e_log){
     if(logs->a_log == NULL || logs->e_log == NULL){
         return -1;
     }
+    if(setvbuf(logs->a_log, NULL, _IOLBF, 0) != 0 ||
+        setvbuf(logs->e_log, NULL, _IOLBF, 0) != 0){
+        return -1;
+    }
 
     int pipefd[2];
     if(pipe2(pipefd, (O_DIRECT | O_NONBLOCK)) == -1){
@@ -212,8 +216,16 @@ int open_logs(struct logs_s *logs, char *a_log, char *e_log){
     return pipefd[1];
 }
 
+void conf_error_write(FILE *file, int err_index, struct tm *t){
+    char log[64];
+    int log_len = 0;
+    log_len = snprintf(log, sizeof(log), "%d-%d-%d_%d:%d:%d-%s\n",
+        t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour,
+        t->tm_min, t->tm_sec, conf_errors[err_index]);
+    fwrite(log, log_len, 1, file);
+}
+
 int conf_error(uint16_t conf_ret, struct configs_s *configs){
-    char message[64] = {0};
     if(conf_ret & E_CONFIGOPEN || conf_ret & E_CNFNOE_LOG){
         return 0;
     }
@@ -223,31 +235,29 @@ int conf_error(uint16_t conf_ret, struct configs_s *configs){
         return 0;
     }
 
+    time_t now = time(NULL);
+    struct tm t;
+    localtime_r(&now, &t);
+
     if(conf_ret & E_ADDRMALLOC){
-        memcpy(&message, "FATAL CONFIG ERROR: Could not load addresses\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 1, &t);
     }
     if(conf_ret & E_CNFNOADDRS){
-        memcpy(&message, "FATAL CONFIG ERROR: No IP addresses provided\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 2, &t);
     }
     if(conf_ret & E_CNFNOPORTN){
-        memcpy(&message, "FATAL CONFIG ERROR: No port number provided\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 3, &t);
     }
     if(conf_ret & E_CNFNOA_LOG){
-        memcpy(&message, "FATAL CONFIG ERROR: No access-log provided\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 4, &t);
     }
     if(conf_ret & E_CNFNOMXCON){
-        memcpy(&message, "FATAL CONFIG ERROR: No maximum connections provided\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 6, &t);
     }
     if(conf_ret & E_CNFNOMETHS){
-        memcpy(&message, "FATAL CONFIG ERROR: No auth methods provided\n", sizeof(message));
-        fwrite(message, sizeof(message), 1, e_file);
+        conf_error_write(e_file, 7, &t);
     }
-    fclose(e_file);
 
+    fclose(e_file);
     return 0;
 }
