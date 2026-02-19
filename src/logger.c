@@ -13,8 +13,9 @@
 #include "logger.h"
 #include "config.h"
 
-#define LOG_TYPE_ERR 0
-#define LOG_TYPE_ACC 1
+#define LOG_TYPE_ERR 0x00
+#define LOG_TYPE_ACC 0x01
+#define PTH_JOIN_SIG 0xff
 
 // ERROR LOG FORMAT |  TYPE_ERR  |  LVL  |  CODE  |
 //   FIXED 4 BYTES  |    0x00    |   1   |   2    |
@@ -24,6 +25,9 @@
 // ADDR TYPE is 0x00=Ignore, 0x01=IPv4, 0x03=Domain Name, 0x04=IPv6
 // The first octet of domain name specifies the length of the address only
 // Somtimes one or the other addr may be blank ¯\_(ツ)_/¯
+
+// THREAD JOIN SIG  |  SIGNAL  |
+//   FIXED 1 BYTE   |   0xff   |
 
 const char *levels[] = {
     "EMERG",
@@ -105,6 +109,12 @@ int parse_acc(uint8_t *buff, char *log, size_t log_size, struct tm *t){
                     t->tm_min, t->tm_sec, c_addr, p_addr, code);
 }
 
+void logger_join(pthread_t logger_thread, int log_fd){
+    uint8_t sig = PTH_JOIN_SIG;
+    write(log_fd, &sig, 1);
+    pthread_join(logger_thread, NULL);
+}
+
 void *logger_th(void *arg){
     struct logs_s *logs = arg;
     struct pollfd pfd;
@@ -131,6 +141,8 @@ void *logger_th(void *arg){
                 case LOG_TYPE_ACC:
                     log_len = parse_acc(buff, log, sizeof(log), &t);
                     break;
+                case PTH_JOIN_SIG:
+                    pthread_exit(NULL);
             }
             switch(buff[0]){
                 case LOG_TYPE_ERR:
