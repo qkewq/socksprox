@@ -24,10 +24,14 @@
 //      VARIABLE    |    0x01    |   2    {|      1      |  VARIABLE  |}x2
 // ADDR TYPE is 0x00=Ignore, 0x01=IPv4, 0x03=Domain Name, 0x04=IPv6
 // The first octet of domain name specifies the length of the address only
-// Somtimes one or the other addr may be blank ¯\_(ツ)_/¯
+// Somtimes one or both addrs may be blank ¯\_(ツ)_/¯
 
+// Added because fatal errors closed the thread before it could be logged
 // THREAD JOIN SIG  |  SIGNAL  |
 //   FIXED 1 BYTE   |   0xff   |
+// Indicates to the logger that the parent process is closing
+// The parent will hang on a join until the logger exits
+// This should be treated as the last message the logger will receive on the pipe
 
 const char *levels[] = {
     "EMERG",
@@ -141,7 +145,7 @@ void *logger_th(void *arg){
                 case LOG_TYPE_ACC:
                     log_len = parse_acc(buff, log, sizeof(log), &t);
                     break;
-                case PTH_JOIN_SIG:
+                case PTH_JOIN_SIG: // Parent thread is closing, there will be no more logs
                     pthread_exit(NULL);
             }
             switch(buff[0]){

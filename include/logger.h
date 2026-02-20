@@ -19,7 +19,7 @@ struct logs_s{
     int r_pipe;
 };
 
-void *logger_th(void *arg);
+void *logger_th(void *arg); // Designed for thread
 void logger_join(pthread_t logger_thread, int log_fd); // Ensures pending logs are written before joining
 void error_log(int fd, uint8_t level, uint16_t code);
 void access_log(int fd, uint16_t code, uint8_t client_atyp, char c_addr[255],

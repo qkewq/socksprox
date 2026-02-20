@@ -35,17 +35,27 @@ int main(int argc, char *argv[]){
     if(log_fd == -1){
         return 1;
     }
- 
+
     pthread_t logger_thread;
-    pthread_create(&logger_thread, NULL, logger_th(&logs), &logs);
-
-    error_log(log_fd, L_INFO, E_LOGGERSETUP);
-
-    int epoll_fd = epoll_create1(0);
-    if(epoll_fd == -1){
-        error_log(log_fd, L_EMERG, E_EPOLLCREATE);
+    if(pthread_create(&logger_thread, NULL, logger_th, &logs) != 0){
         return 1;
     }
 
+    error_log(log_fd, L_INFO, E_LOGGERSETUP);
+
+    struct epoll_event[configs.max_conns];
+    int epoll_fd = epoll_create1(0);
+    if(epoll_fd == -1){
+        error_log(log_fd, L_EMERG, E_EPOLLCREATE);
+        logger_join(logger_thread, log_fd);
+        return 1;
+    }
+
+    if(init_listeners(epoll_fd, &configs) != 0){
+        return 1;
+    }
+    free_config_addrs(&configs);
+
+    logger_join(logger_thread, log_fd); // Ensures pending logs are written
     return 0;
 }
