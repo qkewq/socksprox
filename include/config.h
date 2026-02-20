@@ -10,8 +10,13 @@
 #define E_CNFNOMXCON 0x40
 #define E_CNFNOMETHS 0x80
 
+struct listen_addrs_s{
+    struct addrinfo *next;
+    struct addrinfo *addr;
+};
+
 struct configs_s{
-    struct listen_ip_ll *addrs; // Linked list of addrs AF_UNSPEC
+    struct listen_addrs_s *addrs; // Linked list of addrinfo structs (which may be linked lists)
     uint16_t port; // Listen port
     char a_log[255]; // Path to access log
     char e_log[255]; // Path to error log
@@ -24,7 +29,7 @@ struct configs_s{
 };
 
 uint16_t parse_configs(struct configs_s *configs);
-void free_config_addrs(struct listen_ip_ll *current);
+void free_config_addrs(struct configs_s *configs);
 int test_configs(void);
 
 #endif

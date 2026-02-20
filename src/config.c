@@ -12,11 +12,6 @@
 #define METH_GSSAPI 0x01
 #define METH_USERPW 0x02
 
-struct listen_ip_ll{
-    struct listen_ip_ll *next;
-    char addr[40];
-};
-
 int yes_check(char *val){
     if(strcmp(val, "yes") == 0){
         return 1;
@@ -44,14 +39,29 @@ int method_parse(char *val){
     return -1;
 }
 
-int link_addr(struct configs_s *configs, char *val){
-    struct listen_ip_ll *new_node = malloc(sizeof(struct listen_ip_ll));
+int link_addr(struct configs_s *configs, char *val, char *port){
+    struct addrinfo hints;
+    struct addinfo *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = 0;
+    hints.canonname = NULL;
+    hints.ai_addr = NULL;
+    hints.ai_next = NULL;
+
+    int gai_ret = getaddrinfo(val, port, &hints, &result);
+    if(gai_ret != 0){
+        return 0;
+    }
+    struct listen_addrs_s *new_node = malloc(sizeof(struct listen_addrs_s));
     if(new_node == NULL){
         return E_ADDRMALLOC;
     }
+    new_node->addr = result;
     new_node->next = configs->addrs;
-    memcpy(new_node->addr, val, sizeof(new_node->addr));
-    configs->addrs = new_node;
+    configs->addrs = new_node
+
     return 0;
 }
 
@@ -91,6 +101,7 @@ uint16_t parse_configs(struct configs_s *configs){
     }
     
     char line[255];
+    char port_text[6];
     while(fgets(line, sizeof(line), file) != NULL){
         char *c = line;
         char key[32] = {0};
@@ -134,6 +145,7 @@ uint16_t parse_configs(struct configs_s *configs){
             memcpy(configs->e_log, val, sizeof(configs->e_log));
         }
         else if(strcmp(key, "listen-port") == 0){
+            memcpy(&port_text, val, sizeof(port_text));
             configs->port = atoi(val);
         }
         else if(strcmp(key, "max-connections") == 0){
@@ -155,7 +167,7 @@ uint16_t parse_configs(struct configs_s *configs){
             }
         }
         else if(strcmp(key, "listen") == 0){
-            if(link_addr(configs, val) == E_ADDRMALLOC){
+            if(link_addr(configs, val, port_text) == E_ADDRMALLOC){
                 return E_ADDRMALLOC;
             }
         }
@@ -164,12 +176,15 @@ uint16_t parse_configs(struct configs_s *configs){
     return conf_error_check(configs);
 }
 
-void free_config_addrs(struct listen_ip_ll *current){
+void free_config_addrs(struct configs_s *configs){
+    struct listen_addrs_s *current = configs->addrs;
     while(current != NULL){
-        struct listen_ip_ll *next_node = current->next;
+        freeaddrinfo(current->addr);
+        struct listen_addrs_s *next_node = current->next;
         free(current);
         current = next_node;
     }
+    configs->addrs = NULL;
 }
 
 int test_configs(void){
@@ -195,7 +210,7 @@ int test_configs(void){
         return 0;
     }
     printf("Listening addresses:\n");
-    struct listen_ip_ll *current = configs.addrs;
+    struct listen_addrs_s *current = configs.addrs;
     if(current == NULL){
         printf("\tNO ADDRESSES\n");
     }
