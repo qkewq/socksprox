@@ -54,10 +54,12 @@ const char *conf_errors[] = {
     "FATAL CONFIG ERROR: No auth methods provided",
 };
 
-// "MNEMONICS-message"(keep it short)
+// "MNEMONIC-message"(keep it short)
 const char *server_err[] = {
     "LOGGERSETUP-Start and set up logging",
     "EPOLLCREATE-Could not create epoll instance",
+    "LISTENERROR-Could not setup listeners"
+    "LISTENINITZ-Listeners are bound and waiting for connections"
 };
 
 const char *server_acc[] = {

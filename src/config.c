@@ -8,10 +8,6 @@
 
 #include "config.h"
 
-#define METH_NOAUTH 0x00
-#define METH_GSSAPI 0x01
-#define METH_USERPW 0x02
-
 int yes_check(char *val){
     if(strcmp(val, "yes") == 0){
         return 1;

@@ -16,7 +16,7 @@ void fd_nonblocking(int fd){
 }
 
 int init_listeners(int epoll_fd, struct configs_s *configs){
-    struct listen_addrs_s *current = configs->addrs; //2d linked list??
+    struct listen_addrs_s *current = configs->addrs;
     struct addrinfo *ai_current = NULL;
     if(current == NULL){
         return -1;
@@ -40,5 +40,56 @@ int init_listeners(int epoll_fd, struct configs_s *configs){
         }
         current = current->next;
     }
+
+    return 0;
+}
+
+int accept_new_client(int epoll_fd, int fd){
+    int new_fd = accept(fd, NULL, NULL);
+    if(new_fd == -1){
+        return -1;
+    }
+    fd_nonblocking(new_fd);
+    struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
+    if(data == NULL){
+        close(new_fd);
+        return -1
+    }
+    struct shared_data_s *shared = malloc(sizeof(struct shared_data_s));
+    if(shared == NULL){
+        close(new_fd);
+        free(data);
+        return -1;
+    }
+    memset(data, 0, sizeof(*data));
+    memset(shared, 0, sizeof(*shared));
+    data->is_listener = TYPE_NOLISTENER;
+    data->self_fd = new_fd;
+    data->shared = shared;
+    shared->clientfd = new_fd;
+    shared->cfd_state = STATE_WAITINGMETHODS;
+    shared->serverfd = -1;
+    shared->sfd_state = STATE_STATELESS;
+    shared->c_outbuff.buff = malloc(OUTBUFFSIZE);
+    shared->c_outbuff.capacity = OUTBUFFSIZE;
+    shared->s_outbuff.buff = malloc(OUTBUFFSIZE);
+    shared->s_outbuff.capacity = OUTBUFFSIZE;
+    shared->ptr = NULL;
+    if(shared->c_outbuff.buff == NULL ||
+        shared->s_outbuff.buff == NULL){
+        close(new_fd);
+        free(shared->c_outbuff.buff);
+        free(shared->s_outbuff.buff);
+        free(shared);
+        free(data);
+        return -1;
+    }
+
+    if(ep_add_new_client(epoll_fd, new_fd, data) == -1){
+        close(new_fd);
+        free(data);
+        return -1;
+    }
+
     return 0;
 }

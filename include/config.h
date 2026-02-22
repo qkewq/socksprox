@@ -10,6 +10,11 @@
 #define E_CNFNOMXCON 0x40
 #define E_CNFNOMETHS 0x80
 
+#define METH_NOAUTH 0x00
+#define METH_GSSAPI 0x01
+#define METH_USERPW 0x02
+#define METH_NOMETH 0xFF
+
 struct listen_addrs_s{
     struct addrinfo *next;
     struct addrinfo *addr;
