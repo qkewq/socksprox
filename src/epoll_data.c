@@ -98,6 +98,17 @@ int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
     return 0;
 }
 
+int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
+    struct epoll_event ev;
+    ev.event = EPOLLOUT;
+    ev.data.ptr = data;
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
+        return -1;
+    }
+
+    return 0;
+}
+
 int ep_waiting_send(int epoll_fd, int fd, void *data){
     struct epoll_event ev;
     ev.event = EPOLLIN | EPOLLOUT;

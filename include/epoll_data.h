@@ -24,6 +24,14 @@ struct method_s{
     uint8_t method;
 };
 
+struct req_info_s{
+    uint8_t rep;
+    uint8_t cmd;
+    int ai_index;
+    struct addrinfo *ai;
+    struct sockaddr *sa;
+}
+
 struct ringbuff_s{
     uint8_t *buff;
     size_t readhead;
@@ -53,6 +61,7 @@ size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen);
 size_t consume_ringbuff(struct ringbuff_s *src, size_t consume);
 int ep_add_listener(int epoll_fd, int fd);
 int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data);
+int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data);
 int ep_waiting_send(int epoll_fd, int fd, void *data);
 int ep_done_sending(int epoll_fd, int fd, void *data);
 
