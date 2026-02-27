@@ -30,7 +30,7 @@ struct req_info_s{
     int ai_index;
     struct addrinfo *ai;
     struct sockaddr *sa;
-}
+};
 
 struct ringbuff_s{
     uint8_t *buff;
@@ -47,6 +47,8 @@ struct shared_data_s{
     uint8_t sfd_state;
     struct ringbuff_s c_outbuff;
     struct ringbuff_s s_outbuff; //Will act as inbuff during handshake
+    struct epoll_data_s *c_data;
+    struct epoll_data_s *s_data;
     void *ptr;
 };
 

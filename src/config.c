@@ -37,12 +37,12 @@ int method_parse(char *val){
 
 int link_addr(struct configs_s *configs, char *val, char *port){
     struct addrinfo hints;
-    struct addinfo *result;
+    struct addrinfo *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = 0;
-    hints.canonname = NULL;
+    hints.ai_canonname = NULL;
     hints.ai_addr = NULL;
     hints.ai_next = NULL;
 
@@ -56,7 +56,7 @@ int link_addr(struct configs_s *configs, char *val, char *port){
     }
     new_node->addr = result;
     new_node->next = configs->addrs;
-    configs->addrs = new_node
+    configs->addrs = new_node;
 
     return 0;
 }

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netdb.h>
@@ -30,13 +31,19 @@ int init_listeners(int epoll_fd, struct configs_s *configs){
             if(sfd == -1){
                 return -1;
             }
+            if(ai_current->ai_family == AF_INET6){
+                int flag = 1;
+                if(setsockopt(sfd, IPPROTO_IPV6, IPV6_V6ONLY, &flag, sizeof(flag)) != 0){
+                    return -1;
+                }
+            }
             if(bind(sfd, ai_current->ai_addr, ai_current->ai_addrlen) == -1){
                 return -1;
             }
             fd_nonblocking(sfd);
             listen(sfd, SOMAXCONN);
             if(ep_add_listener(epoll_fd, sfd) != 0){
-                return -1
+                return -1;
             }
             ai_current = ai_current->ai_next;
         }
@@ -55,7 +62,7 @@ int accept_new_client(int epoll_fd, int fd){
     struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
     if(data == NULL){
         close(new_fd);
-        return -1
+        return -1;
     }
     struct shared_data_s *shared = malloc(sizeof(struct shared_data_s));
     if(shared == NULL){
@@ -68,6 +75,8 @@ int accept_new_client(int epoll_fd, int fd){
     data->is_listener = TYPE_NOLISTENER;
     data->self_fd = new_fd;
     data->shared = shared;
+    shared->c_data = data;
+    shared->s_data = NULL;
     shared->clientfd = new_fd;
     shared->cfd_state = STATE_WAITINGMETHODS;
     shared->serverfd = -1;
@@ -97,72 +106,76 @@ int accept_new_client(int epoll_fd, int fd){
 }
 
 int init_connect(int epoll_fd, struct shared_data_s *shared){
-    if(!shared || !shared->ptr || (!shared->ptr->ai && !shared->ptr->sa)){
+    if(!shared || !shared->ptr){
         return -1;
     }
-    if(shared->rep != 0xFF){
+    struct req_info_s *info = shared->ptr;
+    if(!info->ai && !info->sa){
         return -1;
     }
-    if(shared->sa){
-        if(sa->sa_family == AF_INET){
-            (struct sockaddr_in *)sa;
+    if(info->rep != 0xFF){
+        return -1;
+    }
+    int sfd = -1;
+    if(info->sa){
+        if(info->sa->sa_family == AF_INET){
             sfd = socket(AF_INET, SOCK_STREAM, 0);
             if(sfd == -1){
-                shared->ptr->rep = REP_GENFAIL;
+                info->rep = REP_GENFAIL;
                 return 0;
             }
             fd_nonblocking(sfd);
-            if(connect(sfd, sa, sizeof(*sa)) == -1){
-                if(errno != EAGAIN || errno != EINPROGESS){
-                    shared->ptr->rep = REP_GENFAIL;
+            if(connect(sfd, info->sa, sizeof(*info->sa)) == -1){
+                if(errno != EAGAIN && errno != EINPROGRESS){
+                    info->rep = REP_GENFAIL;
                     return 0;
                 }
             }
         }
-        else if(sa->sa_family == AF_INET6){
-            (struct sockaddr_in6 *)sa;
+        else if(info->sa->sa_family == AF_INET6){
             sfd = socket(AF_INET6, SOCK_STREAM, 0);
             if(sfd == -1){
-                shared->ptr->rep == REP_GENFAIL;
+                info->rep == REP_GENFAIL;
                 return 0;
             }
             fd_nonblocking(sfd);
-            if(connect(sfd, sa, sizeof(*sa)) == -1){
-                if(errno != EAGAIN || errno != EINPROGRESS){
-                    shared->ptr->rep = REP_GENFAIL
+            if(connect(sfd, info->sa, sizeof(*info->sa)) == -1){
+                if(errno != EAGAIN && errno != EINPROGRESS){
+                    info->rep = REP_GENFAIL;
                     return 0;
                 }
             }
         }
     }
-    else if(shared->ai){
-        sfd = socket(shared->ptr->ai->ai_family, shared->ptr->ai->ai_socktype, shared->ptr->ai->ai_protocol);
+    else if(info->ai){
+        sfd = socket(info->ai->ai_family, info->ai->ai_socktype, info->ai->ai_protocol);
         if(sfd == -1){
-            shared->ptr->rep = REP_GENFAIL;
+            info->rep = REP_GENFAIL;
             return 0;
         }
         fd_nonblocking(sfd);
-        if(connect(sfd, shared->ai->ai_addr, shared->ai->ai_addrlen) == -1){
-            if(errno != EAGAIN || errno != EINPROGRESS){
-                shared->ptr->rep = REP_GENFAIL;
+        if(connect(sfd, info->ai->ai_addr, info->ai->ai_addrlen) == -1){
+            if(errno != EAGAIN && errno != EINPROGRESS){
+                info->rep = REP_GENFAIL;
                 return 0;
             }
         }
-        shared->ptr->ai_index = 1;
+        info->ai_index = 1;
     }
     struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
     if(!data){
-        shared->ptr->rep = REP_GENFAIL;
+        info->rep = REP_GENFAIL;
         return 0;
     }
     data->is_listener = TYPE_NOLISTENER;
     data->self_fd = sfd;
     data->shared = shared;
+    shared->s_data = data;
     shared->serverfd = sfd;
     shared->sfd_state = STATE_CONNECTING;
-    memset(shared->s_outbuff, 0, OUTBUFFSIZE); // Clear temp inbuff
+    consume_ringbuff(&shared->s_outbuff, OUTBUFFSIZE); // Clear temp inbuff
     if(ep_connecting(epoll_fd, sfd, data) == -1){
-        shared->ptr->rep = REP_GENFAIL;
+        info->rep = REP_GENFAIL;
         return 0;
     }
 
@@ -175,4 +188,58 @@ int init_bind(){
 
 int init_udpa(){
 
+}
+
+int read_data(int self_fd, struct epoll_data_s *data){
+    struct ringbuff_s *outbuff = NULL;
+    if(self_fd == data->shared->clientfd){
+        outbuff = &data->shared->s_outbuff;
+    }
+    else if(self_fd == data->shared->serverfd){
+        outbuff = &data->shared->c_outbuff;
+    }
+
+    size_t freebuff = outbuff->capacity - outbuff->used;
+    if(freebuff == 0){ // Buffer is full
+        return 0;
+    }
+    uint8_t buffer[freebuff];
+    memset(&buffer, 0, freebuff);
+    int recv_ret = recv(self_fd, &buffer, freebuff, 0);
+    if(recv_ret == 0){
+        // recv_eof();
+        return 0;
+    }
+    else if(recv_ret == -1){
+        return -1;
+    }
+    if(write_ringbuff(outbuff, buffer, recv_ret) != recv_ret){
+        return -1;
+    }
+
+    return 0;
+}
+
+int send_data(int self_fd, struct epoll_data_s *data){
+    struct ringbuff_s *outbuff = NULL;
+    if(self_fd == data->shared->clientfd){
+        outbuff = &data->shared->c_outbuff;
+    }
+    else if(self_fd == data->shared->serverfd){
+        outbuff = &data->shared->s_outbuff;
+    }
+
+    uint8_t buffer[outbuff->used];
+    memset(&buffer, 0, outbuff->used);
+    size_t read = peek_ringbuff(outbuff, buffer, outbuff->used);
+    int sent = send(self_fd, &buffer, read, 0);
+    if(sent == -1){
+        return -1;
+    }
+    consume_ringbuff(outbuff, sent);
+    if(read != sent){
+        return sent;
+    }
+
+    return 0;
 }

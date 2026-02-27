@@ -20,6 +20,7 @@
 #define REP_BADATYP 0x08
 
 struct epoll_data_s;
+struct epoll_event;
 struct configs_s;
 uint16_t socks5(int epoll_fd, struct epoll_event *event, struct configs_s *configs);
 

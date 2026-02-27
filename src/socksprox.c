@@ -43,7 +43,7 @@ int main(int argc, char *argv[]){
 
     error_log(log_fd, L_INFO, E_LOGGERSETUP);
 
-    struct epoll_event *events[configs.max_conns] = malloc(sizof(struct epoll_event) * configs.max_conns);
+    struct epoll_event *events = malloc(sizeof(struct epoll_event) * configs.max_conns);
     int epoll_fd = epoll_create1(0);
     if(epoll_fd == -1 || events == NULL){
         error_log(log_fd, L_EMERG, E_EPOLLCREATE);
@@ -61,27 +61,31 @@ int main(int argc, char *argv[]){
     error_log(log_fd, L_INFO, E_LISTENINITZ);
 
     while(1){
-        int nfds = epoll_wait(epoll_fd, *events, configs->max_conns, -1);
+        int nfds = epoll_wait(epoll_fd, events, configs.max_conns, -1);
         if(nfds == -1){
             return 1;
         }
 
         for(int i = 0; i < nfds; i++){
-            switch(events[i]->data->ptr->is_listener){
+            if(!events[i].data.ptr){
+                continue;
+            }
+            struct epoll_data_s *data = events[i].data.ptr;
+            switch(data->is_listener){
                 case TYPE_ISLISTENER:
-                    if(events[i]->events & (EPOLLERR | EPOLLHUP)){
-                        listener_error(events[i]->events, events[i]->data->ptr); // Make this function
+                    if(events[i].events & (EPOLLERR | EPOLLHUP)){
+                        //listener_error(events[i]->events, events[i]->data->ptr); // Make this function
                     }
-                    if(events[i]->events & EPOLLIN){
-                        accept_new_client(epoll_fd, events[i]->data->ptr->self_fd);
+                    if(events[i].events & EPOLLIN){
+                        accept_new_client(epoll_fd, data->self_fd);
                     }
                     break;
                 case TYPE_NOLISTENER:
-                    if(events[i]->events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)){
-                        socks5hup(events[i]->events, events[i]->data->ptr); // Make this function
+                    if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)){
+                        //socks5hup(events[i]->events, events[i]->data->ptr); // Make this function
                     }
-                    if(events[i]->events & (EPOLLIN | EPOLLOUT)){
-                        socks5(epoll_fd, events[i], &configs);
+                    if(events[i].events & (EPOLLIN | EPOLLOUT)){
+                        socks5(epoll_fd, &events[i], &configs);
                     }
                     break;
             }

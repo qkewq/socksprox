@@ -16,7 +16,7 @@
 #define METH_NOMETH 0xFF
 
 struct listen_addrs_s{
-    struct addrinfo *next;
+    struct listen_addrs_s *next;
     struct addrinfo *addr;
 };
 

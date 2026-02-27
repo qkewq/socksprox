@@ -76,7 +76,7 @@ int ep_add_listener(int epoll_fd, int fd){
     data->is_listener = TYPE_ISLISTENER;
     data->self_fd = fd;
     data->shared = NULL;
-    ev.event = EPOLLIN;
+    ev.events = EPOLLIN;
     ev.data.ptr = data;
 
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
@@ -89,7 +89,7 @@ int ep_add_listener(int epoll_fd, int fd){
 
 int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
     struct epoll_event ev;
-    ev.event = EPOLLIN;
+    ev.events = EPOLLIN;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
         return -1;
@@ -100,7 +100,7 @@ int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
 
 int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
     struct epoll_event ev;
-    ev.event = EPOLLOUT;
+    ev.events = EPOLLOUT;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
         return -1;
@@ -111,8 +111,8 @@ int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
 
 int ep_waiting_send(int epoll_fd, int fd, void *data){
     struct epoll_event ev;
-    ev.event = EPOLLIN | EPOLLOUT;
-    ev.event.ptr = data;
+    ev.events = EPOLLIN | EPOLLOUT;
+    ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
         return -1;
     }
@@ -122,8 +122,8 @@ int ep_waiting_send(int epoll_fd, int fd, void *data){
 
 int ep_done_sending(int epoll_fd, int fd, void *data){
     struct epoll_event ev;
-    ev.event = EPOLLIN;
-    ev.event.ptr = data;
+    ev.events = EPOLLIN;
+    ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
         return -1;
     }
