@@ -76,15 +76,18 @@ int main(int argc, char *argv[]){
                     if(events[i].events & (EPOLLERR | EPOLLHUP)){
                         //listener_error(events[i]->events, events[i]->data->ptr); // Make this function
                     }
-                    if(events[i].events & EPOLLIN){
+                    else if(events[i].events & EPOLLIN){
                         accept_new_client(epoll_fd, data->self_fd);
                     }
                     break;
                 case TYPE_NOLISTENER:
                     if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)){
+                        freeclose(epoll_fd, &events[i]);
+                    }
+                    else if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
                         //socks5hup(events[i]->events, events[i]->data->ptr); // Make this function
                     }
-                    if(events[i].events & (EPOLLIN | EPOLLOUT)){
+                    else if(events[i].events & (EPOLLIN | EPOLLOUT)){
                         socks5(epoll_fd, &events[i], &configs);
                     }
                     break;

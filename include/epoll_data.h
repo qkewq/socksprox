@@ -19,12 +19,12 @@
 #define STATE_HALF              0x0A
 #define STATE_FULL              0x0B
 #define STATE_HALFCLOSE         0x0C
-
-struct method_s{
-    uint8_t method;
-};
+#define STATE_FULLCLOSE         0x0D
+#define STATE_RDCLOSE           0x0E
+#define STATE_WRCLOSE           0x0F
 
 struct req_info_s{
+    uint8_t method;
     uint8_t rep;
     uint8_t cmd;
     int ai_index;
@@ -66,5 +66,6 @@ int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data);
 int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data);
 int ep_waiting_send(int epoll_fd, int fd, void *data);
 int ep_done_sending(int epoll_fd, int fd, void *data);
+int ep_delete_fd(int epoll_fd, int fd);
 
 #endif

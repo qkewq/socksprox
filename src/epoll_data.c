@@ -7,14 +7,15 @@
 #include <unistd.h>
 
 #include "epoll_data.h"
+#include "socks.h"
 
 size_t write_ringbuff(struct ringbuff_s *dst, uint8_t *src, size_t srclen){
     if(!dst || !dst->buff || !src){
-        return 0;
+        return SUCCESS;
     }
     size_t free = dst->capacity - dst->used;
     if(srclen > free){ // Not enough space, no partial writes
-        return 0;
+        return SUCCESS;
     }
     size_t first_write = dst->capacity - dst->writehead;
     if(first_write > srclen){
@@ -33,7 +34,7 @@ size_t write_ringbuff(struct ringbuff_s *dst, uint8_t *src, size_t srclen){
 
 size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen){
     if(!src || !src->buff || !dst || src->used == 0){
-        return 0;
+        return SUCCESS;
     }
     if(src->used < dstlen){
         dstlen = src->used;
@@ -53,7 +54,7 @@ size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen){
 
 size_t consume_ringbuff(struct ringbuff_s *src, size_t consume){
     if(!src || !src->buff || src->used == 0){
-        return 0;
+        return SUCCESS;
     }
     if(consume > src->used){
         consume = src->used;
@@ -68,7 +69,7 @@ int ep_add_listener(int epoll_fd, int fd){
     struct epoll_event ev;
     struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
     if(data == NULL){
-        return -1;
+        return NULLCHK_ERR;
     }
     memset(&ev, 0, sizeof(ev));
     memset(data, 0, sizeof(struct epoll_data_s));
@@ -81,10 +82,10 @@ int ep_add_listener(int epoll_fd, int fd){
 
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
         free(data);
-        return -1;
+        return EPOLLCTL_ERR;
     }
 
-    return 0;
+    return SUCCESS;
 }
 
 int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
@@ -92,10 +93,10 @@ int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
     ev.events = EPOLLIN;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
-        return -1;
+        return EPOLLCTL_ERR;
     }
 
-    return 0;
+    return SUCCESS;
 }
 
 int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
@@ -103,10 +104,10 @@ int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
     ev.events = EPOLLOUT;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
-        return -1;
+        return EPOLLCTL_ERR;
     }
 
-    return 0;
+    return SUCCESS;
 }
 
 int ep_waiting_send(int epoll_fd, int fd, void *data){
@@ -114,10 +115,10 @@ int ep_waiting_send(int epoll_fd, int fd, void *data){
     ev.events = EPOLLIN | EPOLLOUT;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
-        return -1;
+        return EPOLLCTL_ERR;
     }
 
-    return 0;
+    return SUCCESS;
 }
 
 int ep_done_sending(int epoll_fd, int fd, void *data){
@@ -125,8 +126,13 @@ int ep_done_sending(int epoll_fd, int fd, void *data){
     ev.events = EPOLLIN;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
-        return -1;
+        return EPOLLCTL_ERR;
     }
 
-    return 0;
+    return SUCCESS;
+}
+
+int ep_delete_fd(int epoll_fd, int fd){
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+    return SUCCESS;
 }

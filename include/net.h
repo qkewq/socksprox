@@ -11,6 +11,7 @@ int accept_new_client(int epoll_fd, int fd);
 int init_connect(int epoll_fd, struct shared_data_s *shared);
 int init_bind();
 int init_udpa();
+int recv_eof(struct epoll_data_s *data);
 int read_data(int self_fd, struct epoll_data_s *data);
 int send_data(int self_fd, struct epoll_data_s *data);
 
