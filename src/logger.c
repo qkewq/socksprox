@@ -58,8 +58,8 @@ const char *conf_errors[] = {
 const char *server_err[] = {
     "LOGGERSETUP-Start and set up logging",
     "EPOLLCREATE-Could not create epoll instance",
-    "LISTENERROR-Could not setup listeners"
-    "LISTENINITZ-Listeners are bound and waiting for connections"
+    "LISTENERROR-Could not setup listeners",
+    "LISTENINITZ-Listeners are bound and waiting for connections",
 };
 
 const char *server_acc[] = {

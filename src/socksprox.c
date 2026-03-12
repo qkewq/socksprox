@@ -74,7 +74,9 @@ int main(int argc, char *argv[]){
             switch(data->is_listener){
                 case TYPE_ISLISTENER:
                     if(events[i].events & (EPOLLERR | EPOLLHUP)){
-                        //listener_error(events[i]->events, events[i]->data->ptr); // Make this function
+                        listener_error(events[i]->events, events[i]->data->ptr);
+                        logger_join(logger_thread, log_fd);
+                        return 1;
                     }
                     else if(events[i].events & EPOLLIN){
                         accept_new_client(epoll_fd, data->self_fd);

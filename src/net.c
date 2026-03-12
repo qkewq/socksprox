@@ -54,6 +54,12 @@ int init_listeners(int epoll_fd, struct configs_s *configs){
     return SUCCESS;
 }
 
+int listen_err(int epoll_fd, uint32_t ev, struct epoll_data_s *data){
+    ep_delete_fd(epoll_fd, data->self_fd);
+
+    return SUCCESS;
+}
+
 int accept_new_client(int epoll_fd, int fd){
     int new_fd = accept(fd, NULL, NULL);
     if(new_fd == -1){
@@ -127,7 +133,7 @@ int init_connect(int epoll_fd, struct shared_data_s *shared){
                 return SUCCESS;
             }
             fd_nonblocking(sfd);
-            if(connect(sfd, info->sa, sizeof(*info->sa)) == -1){
+            if(connect(sfd, info->sa, sizeof(struct sockaddr_in)) == -1){
                 if(errno != EAGAIN && errno != EINPROGRESS){
                     info->rep = REP_GENFAIL;
                     return SUCCESS;
@@ -141,7 +147,7 @@ int init_connect(int epoll_fd, struct shared_data_s *shared){
                 return SUCCESS;
             }
             fd_nonblocking(sfd);
-            if(connect(sfd, info->sa, sizeof(*info->sa)) == -1){
+            if(connect(sfd, info->sa, sizeof(struct sockaddr_in6)) == -1){
                 if(errno != EAGAIN && errno != EINPROGRESS){
                     info->rep = REP_GENFAIL;
                     return SUCCESS;
@@ -184,8 +190,60 @@ int init_connect(int epoll_fd, struct shared_data_s *shared){
     return SUCCESS;
 }
 
-int init_bind(){
+int init_bind(int epoll_fd, struct shared_data_s *shared, struct listen_addrs_s *addrs){
+    if(!shared || !shared->ptr){
+        return NULLCHK_ERR;
+    }
+    struct req_info_s *info = shared->ptr;
+    if(info->rep != 0xFF){
+        return GENERAL_ERR;
+    }
+    if(!addrs){
+        info->rep = REP_BADCOMM;
+        return SUCCESS;
+    }
+    int af = -1
+    if(info->sa){
+        af = info->sa->sa_family;
+    }
+    else if(info->ai){
+        af = info->ai->ai_family;
+    }
+    int sfd = socket(af, SOCK_STREAM, 0);
+    if(sfd == -1){
+        return SOCKOPEN_ERR;
+    }
+    fd_nonblocking(sfd);
+    struct addrinfo *addr = NULL;
+    while(addrs){
+        if(addrs->addr->ai_family == af){
+            addr = addrs->addr;
+            break;
+        }
+        addrs = addrs->next;
+    }
+    if(!addr){
+        close(sfd);
+        info->rep = REP_BADATYP;
+        return SUCCESS;
+    }
 
+    if(bind(sfd, addr->ai_addr, addr->ai_addrlen) == -1){
+        close(sfd);
+        return BIND_ERR;
+    }
+    struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
+    if(!data){
+        close(sfd);
+        return MALLOC_ERR;
+    }
+    data->is_listener = TYPE_NOLISTENER;
+    data->self_fd = sfd;
+    data->shared = shared;
+    shared->s_data = data;
+    shared->serverfd = sfd;
+    shared->sfd_state = STATE_BINDLISTENING;
+    
 }
 
 int init_udpa(){

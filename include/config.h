@@ -20,6 +20,12 @@ struct listen_addrs_s{
     struct addrinfo *addr;
 };
 
+struct block_adds_s{
+    int mask;
+    struct sockaddr sa;
+    struct block_adds_s *next;
+}
+
 struct configs_s{
     struct listen_addrs_s *addrs; // Linked list of addrinfo structs (which may be linked lists)
     uint16_t port; // Listen port
@@ -31,6 +37,7 @@ struct configs_s{
     uint8_t allow_bind;
     uint8_t allow_udpassoc;
     uint8_t methods[255]; // Identifier octets for auth methods set to 1
+    struct listen_addrs_s *bind_addrs;
 };
 
 uint16_t parse_configs(struct configs_s *configs);

@@ -7,9 +7,10 @@ struct epoll_data_s;
 
 void fd_nonblocking(int fd);
 int init_listeners(int epoll_fd, struct configs_s *configs);
+int listen_err(int epoll_fd, uint32_t ev, struct epoll_data_s *data);
 int accept_new_client(int epoll_fd, int fd);
 int init_connect(int epoll_fd, struct shared_data_s *shared);
-int init_bind();
+int init_bind(int epoll_fd, struct shared_data_s *shared);
 int init_udpa();
 int recv_eof(struct epoll_data_s *data);
 int read_data(int self_fd, struct epoll_data_s *data);

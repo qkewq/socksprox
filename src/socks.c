@@ -233,7 +233,7 @@ int waitingcommand(int epoll_fd, struct epoll_data_s *data, struct configs_s *co
                 info->rep = REP_BADCOMM;
                 break;
             }
-            init_bind(); // on success advances state to sending reply
+            init_bind(epoll_fd, data->shared); // on success advances state to sending reply
             break;
         case CMD_UDPA:
             if(!configs->allow_udpassoc){
@@ -558,7 +558,7 @@ uint16_t socks5(int epoll_fd, struct epoll_event *event, struct configs_s *confi
 
     if(data->shared->cfd_state == STATE_FULL &&
         data->shared->sfd_state == STATE_FULL){
-        return forward_traffic(epoll_fd, ev, data); // Exit early
+        return errcheck(epoll_fd, event, forward_traffic(epoll_fd, ev, data)); // Exit early
     }
 // Each state has a function responsible for that state
 // Changing state is passing responsibility to another function
