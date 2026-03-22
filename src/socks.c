@@ -14,9 +14,8 @@
 #include "net.h"
 #include "epoll_data.h"
 #include "config.h"
-
-#define SOCKS5_VERSION 0x05
-#define SOCKS5_RESV 0x00
+#include "logger.h"
+#include "resolver.h"
 
 int vercheck(uint8_t ver){
     if(ver != SOCKS5_VERSION){
@@ -25,164 +24,261 @@ int vercheck(uint8_t ver){
     return 0;
 }
 
-int waitingmethods(int epoll_fd, struct epoll_data_s *data, struct configs_s *configs){
-    size_t freebuff = data->shared->s_outbuff.capacity - data->shared->s_outbuff.used;
+int handshake_err(int epoll_fd, Data *data){
+    log_access(A_CLOSEHANDSHAKE, data->self_fd, NULLFD);
+    data->shared->state = STATE_CLOSED;
+    ep_delete_fd(epoll_fd, data->self_fd);
+    close(data->self_fd);
+    free_data(data);
+
+    return 0;
+}
+
+int reply_with_err(int epoll_fd, Data *data){
+    if(data->shared->info->rep < 0x01 || data->shared->info->rep > 0x08){
+        data->shared->info->rep = REP_GENFAIL;
+    }
+    uint8_t rep[10] = {0};
+    rep[0] = SOCKS5_VERSION;
+    rep[1] = data->shared->info->rep;
+    rep[2] = SOCKS5_RESV;
+    rep[3] = ATYP_IPV4;
+    if(write_ringbuff(&data->shared->client_out, &rep[0], sizeof(rep)) != sizeof(rep)){
+        handshake_err(epoll_fd, data);
+        return 0;
+    }
+    if(ep_waiting_send(epoll_fd, data->shared->client_fd, data->shared->client_data) == -1){
+        handshake_err(epoll_fd, data);
+        return 0;
+    }
+
+    data->shared->state = STATE_SENDING_REPLY;
+    return 0;
+}
+
+int init_command(int epoll_fd, Data *data, Configs *configs){
+    Info *info = data->shared->info;
+    switch(info->cmd){
+        case CMD_CONN:
+            if(!configs->allow_connect){
+                info->rep = REP_BADCOMM;
+                reply_with_err(epoll_fd, data);
+                return 0;
+            }
+            init_connect(epoll_fd, data->shared);
+            break;
+        case CMD_BIND:
+            if(!configs->allow_bind){
+                info->rep = REP_BADCOMM;
+                reply_with_err(epoll_fd, data);
+                return 0;
+            }
+            init_bind(epoll_fd, data->shared, configs);
+            break;
+        case CMD_UDPA:
+            if(!configs->allow_udpassoc){
+                info->rep = REP_BADCOMM;
+                reply_with_err(epoll_fd, data);
+                return 0;
+            }
+            init_udpa();
+            break;
+        default:
+            info->rep = REP_BADCOMM;
+            reply_with_err(epoll_fd, data);
+            break;
+    }
+
+    return 0;
+}
+
+int waitingmethods(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
+    if(!(ev & EPOLLIN) || data->self_fd != data->shared->client_fd){
+        return 0;
+    }
+
+    size_t freebuff = data->shared->server_out.capacity - data->shared->server_out.used;
     uint8_t buffer[freebuff];
     memset(&buffer, 0, freebuff);
     int recv_ret = recv(data->self_fd, buffer, freebuff, 0);
-    if(recv_ret == 0){
-        return RECV_EOF;
-    }
-    else if(recv_ret == -1){
-        return RECV_ERR;
+    if(recv_ret <= 0){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
 
-    if(write_ringbuff(&data->shared->s_outbuff, buffer, recv_ret) != recv_ret){
-        return BUFFWR_ERR;
+    if(write_ringbuff(&data->shared->server_out, buffer, recv_ret) != recv_ret){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(data->shared->s_outbuff.used < 2){ // Need first 2 bytes to get length
-        return SUCCESS;
+    if(data->shared->server_out.used < 2){ // Need first 2 bytes to get total length
+        return 0;
     }
-    uint8_t check2[2] = {0};
-    peek_ringbuff(&data->shared->s_outbuff, &check2[0], sizeof(check2));
-    if(data->shared->s_outbuff.used < check2[1] + 2){ // Check if we have the entire message
-        return SUCCESS;
+
+    uint8_t first_two[2] = {0};
+    uint8_t version = 0;
+    uint8_t nmethods = 0;
+    peek_ringbuff(&data->shared->server_out, &first_two[0], sizeof(first_two));
+    version = first_two[0];
+    nmethods = first_two[1];
+    if(data->shared->server_out.used < 2 + nmethods){ // Check if we have the entire message
+        return 0;
     }
-    consume_ringbuff(&data->shared->s_outbuff, sizeof(check2));
-    if(vercheck(check2[0])){
-        return VER_ERR;
+
+    consume_ringbuff(&data->shared->server_out, sizeof(version) + sizeof(nmethods));
+
+    if(vercheck(version)){
+        log_access(A_VERSIONFAIL, data->self_fd, version);
+        handshake_err(epoll_fd, data);
+        return 0;
     }
+
     uint8_t methods[255] = {0};
     uint8_t selected = 0xFF;
-    size_t len_methods = peek_ringbuff(&data->shared->s_outbuff, &methods[0], check2[1]);
-    for(int i = 0; i < check2[1]; i++){
+    size_t len_methods = peek_ringbuff(&data->shared->server_out, &methods[0], nmethods);
+    for(int i = 0; i < nmethods; i++){
         if(configs->methods[methods[i]] == 1){
             selected = methods[i];
             break;
         }
     }
-    consume_ringbuff(&data->shared->s_outbuff, len_methods);
+
+    consume_ringbuff(&data->shared->server_out, len_methods);
     uint8_t reply[2] = {SOCKS5_VERSION, selected};
-    write_ringbuff(&data->shared->c_outbuff, &reply[0], sizeof(reply));
-    data->shared->cfd_state = STATE_SENDINGMETHOD;
-    struct req_info_s *info = malloc(sizeof(struct req_info_s));
-    if(!info){
-        return NULLCHK_ERR;
-    }
-    info->method = selected;
-    info->rep = 0xFF;
-    info->cmd = 0xFF;
-    info->ai_index = 0;
-    info->ai = NULL;
-    info->sa = NULL;
-    data->shared->ptr = info;
-    int ret = ep_waiting_send(epoll_fd, data->self_fd, data);
-    if(ret != SUCCESS){
-        return ret;
+    write_ringbuff(&data->shared->client_out, &reply[0], sizeof(reply));
+    data->shared->state = STATE_SENDING_METHOD;
+    data->shared->info->method = selected;
+
+    if(ep_waiting_send(epoll_fd, data->self_fd, data) == -1){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
-int sendingmethod(int epoll_fd, struct epoll_event *event){
-    if(event->events & EPOLLIN ||
-        !(event->events & EPOLLOUT)){ // Should not be receiving in this state
-        return GENERAL_ERR;
+int sendingmethod(int epoll_fd, Data *data, uint32_t ev){
+    if(!(ev & EPOLLOUT) || data->self_fd != data->shared->client_fd){
+        return 0;
     }
-    struct epoll_data_s *data = event->data.ptr;
-    uint8_t dst[2] = {0};
-    size_t peek = peek_ringbuff(&data->shared->c_outbuff, &dst[0], sizeof(dst));
-    int sent = send(data->self_fd, &dst, peek, 0);
+
+    uint8_t reply[2] = {0};
+    size_t peek = peek_ringbuff(&data->shared->client_out, &reply[0], sizeof(reply));
+    int sent = send(data->self_fd, &reply, peek, 0);
     if(sent == -1){
-        return SEND_ERR;
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(sent < peek){
-        consume_ringbuff(&data->shared->c_outbuff, sent);
-        return SUCCESS;
+    if(sent < peek){ // Check if all got sent
+        consume_ringbuff(&data->shared->client_out, sent);
+        return 0;
     }
-    consume_ringbuff(&data->shared->c_outbuff, peek);
-    int ret = ep_done_sending(epoll_fd, data->self_fd, data);
-    if(ret != SUCCESS){
-        return ret;
+    consume_ringbuff(&data->shared->client_out, peek);
+
+    if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    struct req_info_s *info = data->shared->ptr;
-    switch(info->method){
+
+    switch(data->shared->info->method){
         case METH_NOAUTH:
-            data->shared->cfd_state = STATE_WAITINGCOMMAND;
+            log_access(A_AUTHNOAUTH, data->self_fd, NULLFD);
+            data->shared->state = STATE_WAITING_COMMAND;
             break;
         case METH_NOMETH:
-            return METHINVAL;
+            log_access(A_BADMETHOD, data->self_fd, NULLFD);
+            handshake_err(epoll_fd, data);
             break;
         default:
-            return METHINVAL;
+            log_access(A_BADMETHOD, data->self_fd, NULLFD);
+            handshake_err(epoll_fd, data);
             break;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
-int waitingcommand(int epoll_fd, struct epoll_data_s *data, struct configs_s *configs){
-    if(!data->shared || !data->shared->ptr){
-        return NULLCHK_ERR;
+int waitingcommand(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
+    if(!(ev & EPOLLIN) || data->self_fd != data->shared->client_fd){
+        return 0;
     }
 
-    size_t freebuff = data->shared->s_outbuff.capacity - data->shared->s_outbuff.used;
+    if(data->shared->info->resolver_ret != -1){ // Resolver returned
+        if(data->shared->info->resolver_ret != 0){
+            data->shared->info->rep = REP_GENFAIL;
+            reply_with_err(epoll_fd, data);
+        }
+        init_command(epoll_fd, data, configs);
+        if(data->shared->info->rep != 0xFF && data->shared->info->rep != REP_SUCCESS){
+            reply_with_err(epoll_fd, data);
+        }
+        return 0;
+    }
+
+    size_t freebuff = data->shared->server_out.capacity - data->shared->server_out.used;
     uint8_t buffer[freebuff];
     memset(&buffer, 0, freebuff);
     int recv_ret = recv(data->self_fd, buffer, freebuff, 0);
-    if(recv_ret == 0){
-        return RECV_EOF;
+    if(recv_ret <= 0){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    else if(recv_ret == -1){
-        return RECV_ERR;
+
+    if(write_ringbuff(&data->shared->server_out, buffer, recv_ret) != recv_ret){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(write_ringbuff(&data->shared->s_outbuff, buffer, recv_ret) != recv_ret){
-        return BUFFWR_ERR;
-    }
+
     uint8_t req[300] = {0};
-    size_t peek = peek_ringbuff(&data->shared->s_outbuff, &req[0], sizeof(req));
-    if(peek == 0){
-        return BUFFRD_ERR;
-    }
+    size_t peek = peek_ringbuff(&data->shared->server_out, &req[0], sizeof(req));
     if(peek < 5){ // Need at least 5 to determine length of req
-        return SUCCESS;
+        return 0;
     }
+
     size_t total_len = 6; // 6 fixed bytes
-    uint8_t addrtype = req[3];
     uint8_t command = req[1];
+    uint8_t addrtype = req[3];
     switch(addrtype){ // Determine total length
         case ATYP_IPV4:
             total_len += 4;
             break;
         case ATYP_DOMN:
+            if(!configs->allow_domains){
+                data->shared->info->rep = REP_BADATYP;
+                reply_with_err(epoll_fd, data);
+                return 0;
+            }
             total_len += req[4];
             break;
         case ATYP_IPV6:
             total_len += 16;
             break;
         default:
-            return COMM_ERR;
-            break;
+            data->shared->info->rep = REP_BADATYP;
+            reply_with_err(epoll_fd, data);
+            return 0;
     }
     if(peek < total_len){ // Do we have total length yet?
-        return SUCCESS;
+        return 0;
     }
 
-    struct req_info_s *info = data->shared->ptr;
+    Info *info = data->shared->info;
     info->cmd = command;
+    info->atyp = addrtype;
 
     if(vercheck(req[0])){
-        return VER_ERR;
+        log_access(A_VERSIONFAIL, data->self_fd, req[0]);
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(addrtype == ATYP_DOMN && configs->allow_domains == 0){
-        info->rep = REP_BADATYP;
-    }
-    switch(addrtype){
+
+    switch(info->atyp){
         case ATYP_IPV4:{
             struct sockaddr_in *sa = malloc(sizeof(struct sockaddr_in));
             if(!sa){
-                return MALLOC_ERR;
+                log_error(L_MALLOCERROR);
+                return -1;
             }
+            memset(sa, 0, sizeof(struct sockaddr_in));
             sa->sin_family = AF_INET;
             memcpy(&sa->sin_port, &req[8], 2);
             memcpy(&sa->sin_addr, &req[4], 4);
@@ -190,25 +286,16 @@ int waitingcommand(int epoll_fd, struct epoll_data_s *data, struct configs_s *co
             break;
         }
         case ATYP_DOMN:{
-            struct addrinfo hints;
-            memset(&hints, 0, sizeof(hints));
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            size_t namelen = req[4];
-            char name[255] = {0};
-            uint16_t nport = req[6 + namelen] | (req[5 + namelen] << 8);
-            memcpy(&name, &req[5], namelen);
-            char port[6] = {0};
-            snprintf(port, sizeof(port), "%d", htons(nport));
-            if(getaddrinfo(name, port, &hints, &info->ai) != 0){
-                return GAI_ERR;
-            }
-            break;
+            log_access(A_ASYNCDNS, data->self_fd, NULLFD);
+            data->shared->state = STATE_ASYNC_DNS;
+            resolve(data->shared, &req[4]);
+            return 0;
         }
         case ATYP_IPV6:{
             struct sockaddr_in6 *sa = malloc(sizeof(struct sockaddr_in6));
             if(!sa){
-                return MALLOC_ERR;
+                log_error(L_MALLOCERROR);
+                return -1;
             }
             memset(sa, 0, sizeof(struct sockaddr_in6));
             sa->sin6_family = AF_INET6;
@@ -218,168 +305,152 @@ int waitingcommand(int epoll_fd, struct epoll_data_s *data, struct configs_s *co
             break;
         }
     }
-    switch(command){
-        case CMD_CONN:
-            if(!configs->allow_connect){
-                info->rep = REP_BADCOMM;
-                break;
-            }
-            if(init_connect(epoll_fd, data->shared) == -1){ // on success advances state to connecting
-                return -1;
-            }
-                break;
-        case CMD_BIND:
-            if(!configs->allow_bind){
-                info->rep = REP_BADCOMM;
-                break;
-            }
-            init_bind(epoll_fd, data->shared); // on success advances state to sending reply
-            break;
-        case CMD_UDPA:
-            if(!configs->allow_udpassoc){
-                info->rep = REP_BADCOMM;
-                break;
-            }
-            init_udpa(); // on success advances state to sending reply
-            break;
-        default:
-            return COMM_ERR;
-            break;
-    }
-    if(info->rep != 0xFF){ // Sending error code
-        consume_ringbuff(&data->shared->s_outbuff, peek);
-        uint8_t rep[10] = {0};
-        rep[0] = SOCKS5_VERSION;
-        rep[1] = info->rep;
-        rep[2] = SOCKS5_RESV;
-        rep[3] = ATYP_IPV4;
-        if(write_ringbuff(&data->shared->c_outbuff, &rep[0], sizeof(rep)) != sizeof(rep)){
-            return BUFFWR_ERR;
-        }
-        data->shared->cfd_state = STATE_SENDINGREPLY;
-        int ret = ep_waiting_send(epoll_fd, data->self_fd, data);
-        if(ret != SUCCESS){
-            return ret;
-        }
-        return SUCCESS;
-    }
-    data->shared->cfd_state = STATE_HALF;
 
-    return SUCCESS;
+    log_access(A_COMMAND, data->self_fd, info->cmd);
+
+    init_command(epoll_fd, data, configs);
+
+    // If the init functions fail they will set info->rep and still return 0
+    // If they succeed they will change state and return 0
+    if(info->rep != 0xFF && info->rep != REP_SUCCESS){
+        reply_with_err(epoll_fd, data);
+    }
+
+    return 0;
 }
 
-int sendingreply(int epoll_fd, struct epoll_event *event){
-    if(!event || event->events & EPOLLIN || !(event->events & EPOLLOUT) || !event->data.ptr){
-        return GENERAL_ERR;
+int sendingreply(int epoll_fd, Data *data, uint32_t ev){
+    if(!(ev & EPOLLOUT) || data->self_fd != data->shared->client_fd){
+        return 0;
     }
-    struct epoll_data_s *data = event->data.ptr;
-    if(!data->shared){
-        return NULLCHK_ERR;
-    }
+
     uint8_t reply[300] = {0};
-    size_t peek = peek_ringbuff(&data->shared->c_outbuff, &reply[0], sizeof(reply));
+    size_t peek = peek_ringbuff(&data->shared->client_out, &reply[0], sizeof(reply));
     int sent = send(data->self_fd, &reply, peek, 0);
     if(sent == -1){
-        return SEND_ERR;
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(sent < peek){
-        consume_ringbuff(&data->shared->c_outbuff, sent);
-        return SUCCESS;
+    if(sent < peek){ // Check if we sent it all
+        consume_ringbuff(&data->shared->client_out, sent);
+        return 0;
     }
-    consume_ringbuff(&data->shared->c_outbuff, peek);
+
+    consume_ringbuff(&data->shared->client_out, peek);
+    log_access(A_SOCKSREPLY, data->self_fd, data->shared->info->rep);
+
+    if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
+        handshake_err(epoll_fd, data);
+        return 0;
+    }
     int ret = ep_done_sending(epoll_fd, data->self_fd, data);
-    if(ret != SUCCESS){
-        return ret;
+    if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
+        handshake_err(epoll_fd, data);
+        return 0;
     }
-    if(!data->shared->ptr){
-        return NULLCHK_ERR;
-    }
-    struct req_info_s *info = data->shared->ptr;
+
+    Info *info = data->shared->info;
     if(info->rep != REP_SUCCESS){
-        return CLOSECONN;
+        handshake_err(epoll_fd, data);
+        return 0;
     }
+
     switch(info->cmd){
         case CMD_CONN:
-            data->shared->cfd_state = STATE_HALF;
+            data->shared->state = STATE_FULL;
             break;
-        case CMD_BIND: //!!
-            return -1;
+        case CMD_BIND:
+            info->rep = 0xFF; // Reset for sending reply 2
+            data->shared->state = STATE_BIND_LISTENING;
             break;
         case CMD_UDPA: //!!
             return -1;
             break;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
-int connecting(int epoll_fd, struct epoll_event *event){
-    if(!event || !event->data.ptr){
-        return NULLCHK_ERR;
+int connecting(int epoll_fd, Data *data, uint32_t ev){
+    if(!(ev & EPOLLOUT) || data->self_fd != data->shared->server_fd){
+        return 0;
     }
-    int ret;
-    struct epoll_data_s *data = event->data.ptr;
-    if(!(event->events & EPOLLOUT || event->events & EPOLLERR)){
-        return GENERAL_ERR;
-    }
+
     int error = 0;
     int errlen = sizeof(error);
     if(getsockopt(data->self_fd, SOL_SOCKET, SO_ERROR, &error, &errlen) == -1){
-        return GSO_ERR;
+        log_error(L_GETESOCKOPTFAIL);
+        data->shared->info->rep = REP_GENFAIL;
+        reply_with_err(epoll_fd, data);
+        return 0;
     }
+
     struct sockaddr_storage ss;
-    struct req_info_s *info = data->shared->ptr;
+    struct Info *info = data->shared->info;
     socklen_t sslen = sizeof(ss);
     memset(&ss, 0, sizeof(ss));
-    if(error == 0){
+
+    if(error == 0){ // Successful connection
         info->rep = REP_SUCCESS;
         if(getsockname(data->self_fd, (struct sockaddr *)&ss, &sslen) == -1){
-            return GSN_ERR;
+            log_error(L_GETSOCKNAMEFAIL);
+            info->rep = REP_GENFAIL;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
+
         uint8_t rep_info[3] = {0};
         rep_info[0] = SOCKS5_VERSION;
         rep_info[1] = info->rep;
         rep_info[2] = SOCKS5_RESV;
-        write_ringbuff(&data->shared->c_outbuff, &rep_info[0], 3);
+        write_ringbuff(&data->shared->client_out, &rep_info[0], sizeof(rep_info));
         int family = ss.ss_family;
         uint8_t atyp = 0;
-        data->shared->cfd_state = STATE_SENDINGREPLY;
+        data->shared->state = STATE_SENDING_REPLY;
+
         if(family == AF_INET){
             struct sockaddr_in *sa = (struct sockaddr_in *)&ss;
             atyp = ATYP_IPV4;
-            write_ringbuff(&data->shared->c_outbuff, &atyp, 1);
-            write_ringbuff(&data->shared->c_outbuff, (uint8_t *)&sa->sin_addr, 4);
-            write_ringbuff(&data->shared->c_outbuff, (uint8_t *)&sa->sin_port, 2);
-            ret = ep_waiting_send(epoll_fd, data->shared->clientfd, data->shared->c_data);
-            if(ret != SUCCESS){
-                return ret;
+            write_ringbuff(&data->shared->client_out, &atyp, 1);
+            write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin_addr, 4);
+            write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin_port, 2);
+            if(ep_waiting_send(epoll_fd, data->shared->client_fd, data->shared->client_data) == -1){
+                info->rep = REP_GENFAIL;
+                reply_with_err(epoll_fd, data);
+                return 0;
             }
-            ret = ep_done_sending(epoll_fd, data->self_fd, data);
-            if(ret != SUCCESS){
-                return ret;
+
+            if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
+                info->rep = REP_GENFAIL;
+                reply_with_err(epoll_fd, data);
+                return 0;
             }
-            data->shared->sfd_state = STATE_HALF;
-            return SUCCESS;
+
+            return 0;
         }
         else if(family == AF_INET6){
             struct sockaddr_in6 *sa = (struct sockaddr_in6 *)&ss;
             atyp = ATYP_IPV6;
-            write_ringbuff(&data->shared->c_outbuff, &atyp, 1);
-            write_ringbuff(&data->shared->c_outbuff, (uint8_t *)&sa->sin6_addr, 16);
-            write_ringbuff(&data->shared->c_outbuff, (uint8_t *)&sa->sin6_port, 2);
-            ret = ep_waiting_send(epoll_fd, data->shared->clientfd, data->shared->c_data);
-            if(ret != SUCCESS){
-                return ret;
+            write_ringbuff(&data->shared->client_out, &atyp, 1);
+            write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin6_addr, 16);
+            write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin6_port, 2);
+            if(ep_waiting_send(epoll_fd, data->shared->client_fd, data->shared->client_data) == -1){
+                info->rep = REP_GENFAIL;
+                reply_with_err(epoll_fd, data);
+                return 0;
             }
-            ep_done_sending(epoll_fd, data->self_fd, data);
-            if(ret != SUCCESS){
-                return ret;
+
+            if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
+                info->rep = REP_GENFAIL;
+                reply_with_err(epoll_fd, data);
+                return 0;
             }
-            data->shared->sfd_state = STATE_HALF;
-            return SUCCESS;
+
+            return 0;
         }
     }
-    if(info->ai && info->ai->ai_next){
+
+    if(info->ai && info->ai->ai_next){ // Try next addr if it exists
         info->ai_index += 1;
         struct addrinfo *current = info->ai;
         for(int i = 0; i < info->ai_index; i++){
@@ -390,9 +461,10 @@ int connecting(int epoll_fd, struct epoll_event *event){
         }
         if(current){
             connect(data->self_fd, current->ai_addr, current->ai_addrlen);
-            return SUCCESS;
+            return 0;
         }
     }
+
     if(error & ENETUNREACH){
         info->rep = REP_NUNRECH;
     }
@@ -408,270 +480,178 @@ int connecting(int epoll_fd, struct epoll_event *event){
     else{
         info->rep = REP_GENFAIL;
     }
-    uint8_t reply[10] = {0};
-    reply[0] = SOCKS5_VERSION;
-    reply[1] = info->rep;
-    reply[2] = SOCKS5_RESV;
-    reply[3] = ATYP_IPV4;
-    write_ringbuff(&data->shared->c_outbuff, &reply[0], 10);
-    ret = ep_waiting_send(epoll_fd, data->shared->clientfd, data->shared->c_data);
-    if(ret != SUCCESS){
-        return ret;
-    }
-    ret = ep_done_sending(epoll_fd, data->self_fd, data);
-    if(ret != SUCCESS){
-        return ret;
-    }
-    data->shared->sfd_state = STATE_HALF;
-    data->shared->cfd_state = STATE_SENDINGREPLY;
 
-    return SUCCESS;
+    reply_with_err(epoll_fd, data);
+
+    return 0;
 }
 
-int rd_close(int epoll_fd, struct epoll_data_s *data){
-    data->shared->cfd_state = STATE_FULLCLOSE; // Too lazy to write half close logic
-    data->shared->sfd_state = STATE_FULLCLOSE;
-    return SUCCESS;
-}
-
-int wr_close(int epoll_fd, struct epoll_data_s *data){
-    data->shared->cfd_state = STATE_FULLCLOSE; // Still too lazy
-    data->shared->sfd_state = STATE_FULLCLOSE;
-    return SUCCESS;
-}
-
-int half(int epoll_fd, struct epoll_data_s *data){
-    if(!data || !data->shared){
-        return NULLCHK_ERR;
-    }
-    if(data->shared->cfd_state != STATE_HALF || data->shared->sfd_state != STATE_HALF){
-        return SUCCESS;
-    }
-    data->shared->cfd_state = STATE_FULL;
-    data->shared->sfd_state = STATE_FULL;
-    if(data->shared->ptr){
-        struct req_info_s *info = data->shared->ptr;
-        if(info->sa){
-            free(info->sa);
-        }
-        else if(info->ai){
-            freeaddrinfo(info->ai);
-        }
-        free(info);
-        data->shared->ptr = NULL;
-    }
-    consume_ringbuff(&data->shared->c_outbuff, OUTBUFFSIZE);
-    consume_ringbuff(&data->shared->s_outbuff, OUTBUFFSIZE);
-
-    return SUCCESS;
-}
-
-int forward_traffic(int epoll_fd, uint32_t event, struct epoll_data_s *data){
-    if(!data || !data->shared || !data->shared){
-        return NULLCHK_ERR;
-    }
-    int ret;
-    int oppfd = -1;
-    struct epoll_data_s *oppdata = NULL;
-    if(data->self_fd== data->shared->clientfd){
-        oppfd = data->shared->serverfd;
-        oppdata = data->shared->s_data;
-    }
-    else if(data->self_fd == data->shared->serverfd){
-        oppfd = data->shared->clientfd;
-        oppdata = data->shared->c_data;
+int bindlistening(int epoll_fd, Data *data, uint32_t ev){
+    if(!(ev & EPOLLIN) || data->self_fd != data->shared->server_fd){
+        return 0;
     }
 
-    if(event & EPOLLIN){
-        ret = read_data(data->self_fd, data);
-        if(ret != SUCCESS){
-            return ret;
+    Info *info = data->shared->info;
+    struct sockaddr_storage ss;
+    int ss_len = sizeof(ss);
+    int new_fd = accept(data->self_fd, (struct sockaddr *)&ss, &ss_len);
+    if(new_fd == -1){
+        info->rep = REP_GENFAIL;
+        reply_with_err(epoll_fd, data);
+        return 0;
+    }
+
+    struct sockaddr *req_addr = NULL;
+    if(info->sa){
+        req_addr = info->sa;
+    }
+    else if(info->ai){
+        req_addr = info->ai->ai_addr;
+    }
+    else{
+        info->rep = REP_GENFAIL;
+        reply_with_err(epoll_fd, data);
+        return 0;
+    }
+
+    if(req_addr->sa_family != ss.ss_family){
+        info->rep = REP_RULESET;
+        reply_with_err(epoll_fd, data);
+        return 0;
+    }
+
+    if(ss.ss_family == AF_INET){
+        struct sockaddr_in *sa = (struct sockaddr_in *)&ss;
+        struct sockaddr_in *req = (struct sockaddr_in *)req_addr;
+        if(sa->sin_port != req->sin_port){
+            info->rep = REP_RULESET;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
-        ret = ep_waiting_send(epoll_fd, oppfd, oppdata);
-        if(ret != SUCCESS){
-            return ret;
+        if(sa->sin_addr.s_addr != req->sin_addr.s_addr){
+            info->rep = REP_RULESET;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
     }
-    else if(event & EPOLLOUT){
-        int send_ret = send_data(data->self_fd, data);
-        if(send_ret < SUCCESS){
-            return SEND_ERR;
+    else if(ss.ss_family == AF_INET6){
+        struct sockaddr_in6 *sa = (struct sockaddr_in6 *)&ss;
+        struct sockaddr_in6 *req = (struct sockaddr_in6 *)req_addr;
+        if(sa->sin6_port != req->sin6_port){
+            info->rep = REP_RULESET;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
-        else if(send_ret == SUCCESS){
-            ret = ep_done_sending(epoll_fd, data->self_fd, data);
-            if(ret != SUCCESS){
-                return ret;
-            }
+        if(memcmp(&sa->sin6_addr, &req->sin6_addr, sizeof(struct in6_addr)) != 0){
+            info->rep = REP_RULESET;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
     }
 
-    return SUCCESS;
-}
-
-int errcheck(int epoll_fd, struct epoll_event *event, uint16_t code){
-    if(code == SUCCESS){
-        return SUCCESS;
-    }
-    if(!event || !event->data.ptr){
-        return SUCCESS;
-    }
-    struct epoll_data_s *data = event->data.ptr;
-    switch(code){ // I'll add the rest when the logger is built
-        case RECV_EOF:
-            recv_eof(data);
-            break;
-        default:
-            freeclose(epoll_fd, event);
-            return SUCCESS;
-            break;
+    close(data->self_fd);
+    ep_delete_fd(epoll_fd, data->self_fd);
+    data->self_fd = new_fd;
+    data->shared->server_fd = new_fd;
+    if(ep_add_new_client(epoll_fd, new_fd, data) == -1){
+        info->rep = REP_GENFAIL;
+        reply_with_err(epoll_fd, data);
+        return 0;
     }
 
-    return SUCCESS;
-}
+    uint8_t rep_info[3] = {0};
+    rep_info[0] = SOCKS5_VERSION;
+    rep_info[1] = info->rep;
+    rep_info[2] = SOCKS5_RESV;
+    write_ringbuff(&data->shared->client_out, &rep_info[0], sizeof(rep_info));
+    uint8_t atype = 0;
 
-uint16_t socks5(int epoll_fd, struct epoll_event *event, struct configs_s *configs){
-    if(!event || !event->data.ptr){
-        return NULLCHK_ERR;
-    }
-    struct epoll_data_s *data = event->data.ptr;
-    if(!data->shared || !configs){
-        return NULLCHK_ERR;
-    }
-    uint32_t ev = event->events;
-    int ret;
-    if(data->is_listener == TYPE_ISLISTENER || data->self_fd == -1){
-        return BADTYPE;
-    }
-
-    if(data->shared->sfd_state == STATE_STATELESS &&
-        data->shared->cfd_state == STATE_STATELESS){
-        return BADSTATE;
-    }
-
-    if(data->shared->sfd_state == STATE_HALF &&
-        data->shared->cfd_state == STATE_HALF){
-        ret = half(epoll_fd, data);
-        if(ret != SUCCESS){
-            return ret;
+    if(ss.ss_family == AF_INET){
+        struct sockaddr_in *sa = (struct sockaddr_in *)&ss;
+        atype = ATYP_IPV4;
+        write_ringbuff(&data->shared->client_out, &atype, 1);
+        write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin_addr, 4);
+        write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin_port, 2);
+        if(ep_waiting_send(epoll_fd, data->shared->client_fd, data->shared->client_data) == -1){
+            info->rep = REP_GENFAIL;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
     }
-
-    if(data->shared->cfd_state == STATE_FULL &&
-        data->shared->sfd_state == STATE_FULL){
-        return errcheck(epoll_fd, event, forward_traffic(epoll_fd, ev, data)); // Exit early
-    }
-// Each state has a function responsible for that state
-// Changing state is passing responsibility to another function
-    if(data->self_fd == data->shared->clientfd){
-        switch(data->shared->cfd_state){
-            case STATE_WAITINGMETHODS:
-                ret = waitingmethods(epoll_fd, data, configs);
-                break;
-            case STATE_SENDINGMETHOD:
-                ret = sendingmethod(epoll_fd, event);
-                break;
-            case STATE_AUTHENTICATING:
-                return 0;
-                break;
-            case STATE_WAITINGCOMMAND:
-                ret = waitingcommand(epoll_fd, data, configs);
-                break;
-            case STATE_SENDINGREPLY:
-                ret =  sendingreply(epoll_fd, event);
-                break;
-            case STATE_SENDINGREPLY_2:
-                break;
-            case STATE_HALF: //!!
-                break;
-            case STATE_FULL:
-                break;
-            case STATE_HALFCLOSE:
-                break;
-            case STATE_FULLCLOSE:
-                freeclose(epoll_fd, event);
-                break;
-            case STATE_RDCLOSE:
-                ret = rd_close(epoll_fd, data);
-                break;
-            case STATE_WRCLOSE:
-                ret = wr_close(epoll_fd, data);
-                break;
-            default:
-                return GENERAL_ERR;
-                break;
-        }
-    }
-    else if(data->self_fd == data->shared->serverfd){
-        switch(data->shared->sfd_state){
-            case STATE_CONNECTING:
-                ret = connecting(epoll_fd, event);
-                break;
-            case STATE_BINDLISTENING:
-                break;
-            case STATE_HALF: //!!
-                break;
-            case STATE_FULL:
-                break;
-            case STATE_HALFCLOSE:
-                break;
-            case STATE_FULLCLOSE:
-                freeclose(epoll_fd, event);
-                break;
-            case STATE_RDCLOSE:
-                ret = rd_close(epoll_fd, data);
-                break;
-            case STATE_WRCLOSE:
-                ret = wr_close(epoll_fd, data);
-                break;
-            default:
-                return GENERAL_ERR;
-                break;
+    else if(ss.ss_family == AF_INET6){
+        struct sockaddr_in6 *sa = (struct sockaddr_in6 *)&ss;
+        atype = ATYP_IPV6;
+        write_ringbuff(&data->shared->client_out, &atype, 1);
+        write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin6_addr, 16);
+        write_ringbuff(&data->shared->client_out, (uint8_t *)&sa->sin6_port, 2);
+        if(ep_waiting_send(epoll_fd, data->shared->client_fd, data->shared->client_data) == -1){
+            info->rep = REP_GENFAIL;
+            reply_with_err(epoll_fd, data);
+            return 0;
         }
     }
     else{
-        return GENERAL_ERR;
+        info->rep = REP_GENFAIL;
+        reply_with_err(epoll_fd, data);
+        return 0;
     }
 
-    errcheck(epoll_fd, event, ret);
-    return SUCCESS;
+    data->shared->state = STATE_SENDING_REPLY_2;
+    return 0;
 }
 
-uint16_t freeclose(int epoll_fd, struct epoll_event *events){
-    if(!events || !events->data.ptr){
-        return NULLCHK_ERR;
-    }
-    struct epoll_data_s *data = events->data.ptr;
-    if(!data->shared){ // Listener or we already freed the other side
-        ep_delete_fd(epoll_fd, data->self_fd);
-        // close(data->self_fd);
-        free(data);
-        return SUCCESS;
-    }
-    struct shared_data_s *shared = data->shared;
-    if(shared->sfd_state != STATE_STATELESS){
-        shared->cfd_state = STATE_FULLCLOSE;
-        shared->sfd_state = STATE_FULLCLOSE;
-    }
-    if(shared->ptr){
-        struct req_info_s *info = shared->ptr;
-        if(info->ai){
-            freeaddrinfo(info->ai);
-        }
-        else if(info->sa){
-            free(info->sa);
-        }
-        free(info);
-    }
-    // No need to free the data pointers in shared
-    shared->c_data = NULL; // Prevent double free
-    shared->s_data = NULL;
-    free(shared->c_outbuff.buff);
-    free(shared->s_outbuff.buff);
-    close(shared->clientfd);
-    close(shared->serverfd);
-    free(shared);
+int closed(int epoll_fd, Data *data){
+    close(data->self_fd);
     ep_delete_fd(epoll_fd, data->self_fd);
-    free(data);
+    free_data(data);
 
-    return SUCCESS;
+    return 0;
+}
+
+uint16_t socks5(int epoll_fd, struct epoll_event *event, Configs *configs){
+    Data *data = event->data.ptr;
+    if(!data->shared){
+        log_error(L_NULLCHECKFAIL);
+        return 0;
+    }
+
+    uint32_t ev = event->events;
+    int ret = 0;
+    switch(data->shared->state){ // These are not necessarily in order
+        case STATE_NO_STATE: // I don't think this is possible
+            break;
+        case STATE_WAITING_METHODS:
+            ret = waitingmethods(epoll_fd, data, configs, ev);
+            break;
+        case STATE_SENDING_METHOD:
+            ret = sendingmethod(epoll_fd, data, ev);
+            break;
+        case STATE_AUTHENTICATING: // ??
+            break;
+        case STATE_WAITING_COMMAND:
+            ret = waitingcommand(epoll_fd, data, configs, ev);
+            break;
+        case STATE_ASYNC_DNS: // This should never happen
+            break;
+        case STATE_SENDING_REPLY:
+            ret = sendingreply(epoll_fd, data, ev);
+            break;
+        case STATE_SENDING_REPLY_2:
+        case STATE_CONNECTING:
+            ret = connecting(epoll_fd, data, ev);
+            break;
+        case STATE_BIND_LISTENING:
+            ret = bindlistening(epoll_fd, data, ev);
+            break;
+        case STATE_FULL:
+        case STATE_FULL_UDPA:
+        case STATE_HALF_CLOSE:
+        case STATE_CLOSED:
+            ret = closed(epoll_fd, data);
+            break;
+        default:
+            break;
+    }
+
+    return ret;
 }

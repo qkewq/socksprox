@@ -1,33 +1,53 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#define L_EMERG 0
-#define L_ALERT 1
-#define L_CRITICAL 2
-#define L_ERROR 3
-#define L_WARN 4
-#define L_NOTICE 5
-#define L_INFO 6
+#define NULLFD -1
 
-#define E_LOGGERSETUP 0x00
-#define E_EPOLLCREATE 0x01
-#define E_LISTENERROR 0x02
-#define E_LISTENINITZ 0x03
+#define L_SPSTARTUP         0x00
+#define L_LOGGERSETUP       0x01
+#define L_EPOLLCREATE       0x02
+#define L_EPOLLERROR        0x03
+#define L_LISTENINIT        0x04
+#define L_LISTENERROR       0x05
+#define L_RESOLVERSTART     0x06
+#define L_RESOLVERERROR     0x07
+#define L_NORESOLVER        0x08
+#define L_MALLOCERROR       0x09
+#define L_EPOLLERRORADD     0x0A
+#define L_EPOLLERRORMOD     0x0B
+#define L_EPOLLERRORDEL     0x0C
+#define L_BINDLISTENER      0x0D
+#define L_EPOLLWAITERROR    0x0E
+#define L_EPOLLDATANULL     0x0F
+#define L_NEWCLIENTFAIL     0x10
+#define L_NULLCHECKFAIL     0x11
+#define L_GETESOCKOPTFAIL   0x12
+#define L_GETSOCKNAMEFAIL   0x13
 
-struct configs_s; // From config.h
-struct logs_s{
-    FILE *a_log;
-    FILE *e_log;
+#define A_ACCEPTNEWCLIENT   0x00
+#define A_CLOSEHANDSHAKE    0x01
+#define A_VERSIONFAIL       0x02
+#define A_AUTHNOAUTH        0x03
+#define A_BADMETHOD         0x04
+#define A_ASYNCDNS          0x05
+#define A_COMMAND           0x06
+#define A_SOCKSREPLY        0x07
+
+typedef struct Configs Configs;
+
+typedef struct Logger{
+    char *a_log_path;
+    char *e_log_path;
     int r_pipe;
-};
+    int w_pipe;
+} Logger;
 
-void *logger_th(void *arg); // Designed for thread
-void logger_join(pthread_t logger_thread, int log_fd); // Blocks until the logger is done writing and joins thread
-void error_log(int fd, uint8_t level, uint16_t code);
-void access_log(int fd, uint16_t code, uint8_t client_atyp, char c_addr[255],
-                uint8_t peer_atyp, char p_addr[255]);
-int open_logs(struct logs_s *logs, char *a_log, char *e_log);
-int conf_error(uint16_t conf_ret, struct configs_s *configs);
+extern Logger logger;
 
+int init_logger(pthread_t *thread, Configs *configs);
+void log_custom(char *str, uint8_t strsz, uint8_t file);
+void log_error(uint8_t code);
+void log_access(uint8_t code, int client_fd, int server_fd);
+void log_sig_join(pthread_t logger_thread);
 
 #endif

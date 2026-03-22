@@ -7,96 +7,108 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "config.h"
 #include "logger.h"
 #include "net.h"
 #include "epoll_data.h"
 #include "socks.h"
+#include "resolver.h"
 
 int main(int argc, char *argv[]){
-    for(int i = 0; i < argc; i++){ //Run config tester and exit
-        if(strcmp(argv[i], "-t") == 0){
-            test_configs();
-            return 0;
-        }
-    }
-
-    struct configs_s configs;
-    struct logs_s logs;
+    signal(SIGPIPE, SIG_IGN); // SIGPIPEs are handled locally
+    Configs configs;
     memset(&configs, 0, sizeof(configs));
-    uint16_t conf_ret = parse_configs(&configs);
-    if(conf_ret != 0){ // Log and exit on fatal config errors
-        conf_error(conf_ret, &configs);
-        return 1;
-    }
-
-    int log_fd = open_logs(&logs, configs.a_log, configs.e_log);
-    if(log_fd == -1){
+    if(parse_configs(&configs)){
         return 1;
     }
 
     pthread_t logger_thread;
-    if(pthread_create(&logger_thread, NULL, logger_th, &logs) != 0){
+    if(init_logger(&logger_thread, &configs) != 0){ // Start logger
         return 1;
     }
 
-    error_log(log_fd, L_INFO, E_LOGGERSETUP);
+    log_error(L_SPSTARTUP);
+    log_error(L_LOGGERSETUP);
 
     struct epoll_event *events = malloc(sizeof(struct epoll_event) * configs.max_conns);
-    int epoll_fd = epoll_create1(0);
-    if(epoll_fd == -1 || events == NULL){
-        error_log(log_fd, L_EMERG, E_EPOLLCREATE);
-        logger_join(logger_thread, log_fd);
+    int epoll_fd = epoll_create1(0); // Start epoll
+    if(!events){
+        log_error(L_MALLOCERROR);
+        log_sig_join(logger_thread);
+    }
+    if(epoll_fd == -1){
+        log_error(L_EPOLLERROR);
+        log_sig_join(logger_thread);
         return 1;
     }
 
-    if(init_listeners(epoll_fd, &configs) != 0){
-        error_log(log_fd, L_EMERG, E_LISTENERROR);
-        logger_join(logger_thread, log_fd);
+    log_error(L_EPOLLCREATE);
+
+    if(init_listeners(epoll_fd, configs.listen_head) != 0){ // Create listeners
+        log_error(L_LISTENERROR);
+        log_sig_join(logger_thread);
         return 1;
     }
-    free_config_addrs(&configs);
 
-    error_log(log_fd, L_INFO, E_LISTENINITZ);
+    log_error(L_LISTENINIT);
 
-    while(1){
+    pthread_t resolver_thread;
+    if(configs.allow_domains){ // Start resolver if configured
+        if(init_resolver(&resolver_thread, epoll_fd) != 0){
+            log_error(L_RESOLVERERROR);
+            configs.allow_domains = 0;
+            log_error(L_NORESOLVER);
+        }
+        else{
+            log_error(L_RESOLVERSTART);
+        }
+    }
+    else{
+        log_error(L_NORESOLVER);
+    }
+
+    while(1){ // Event loop
         int nfds = epoll_wait(epoll_fd, events, configs.max_conns, -1);
         if(nfds == -1){
+            log_error(L_EPOLLWAITERROR);
+            log_sig_join(logger_thread);
             return 1;
         }
 
         for(int i = 0; i < nfds; i++){
             if(!events[i].data.ptr){
+                log_error(L_EPOLLDATANULL);
                 continue;
             }
-            struct epoll_data_s *data = events[i].data.ptr;
-            switch(data->is_listener){
-                case TYPE_ISLISTENER:
-                    if(events[i].events & (EPOLLERR | EPOLLHUP)){
-                        listener_error(events[i]->events, events[i]->data->ptr);
-                        logger_join(logger_thread, log_fd);
+
+            Data *data = events[i].data.ptr;
+            switch(data->type){
+                case TYPE_LISTENER:
+                    if(events[i].events & EPOLLIN){
+                        if(accept_new_client(epoll_fd, data->self_fd) == -1){
+                            log_error(L_NEWCLIENTFAIL);
+                        }
+                    }
+                    else{
+                        log_error(L_LISTENERROR);
+                        log_sig_join(logger_thread);
                         return 1;
                     }
-                    else if(events[i].events & EPOLLIN){
-                        accept_new_client(epoll_fd, data->self_fd);
-                    }
                     break;
-                case TYPE_NOLISTENER:
-                    if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)){
-                        freeclose(epoll_fd, &events[i]);
-                    }
-                    else if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
-                        //socks5hup(events[i]->events, events[i]->data->ptr); // Make this function
-                    }
-                    else if(events[i].events & (EPOLLIN | EPOLLOUT)){
+                case TYPE_PEER:
+                    if(events[i].events & (EPOLLIN | EPOLLOUT)){
                         socks5(epoll_fd, &events[i], &configs);
                     }
+                    break;
+                case TYPE_RESOLVER:
+                    resolve_ret(epoll_fd, &configs); // Do not look in here
                     break;
             }
         }
     }
 
-    logger_join(logger_thread, log_fd); // Ensures pending logs are written
+    log_sig_join(logger_thread); // Ensures pending logs are written
     return 0;
 }

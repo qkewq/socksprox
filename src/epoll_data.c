@@ -5,17 +5,19 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
 
 #include "epoll_data.h"
 #include "socks.h"
+#include "logger.h"
+#include "resolver.h"
 
-size_t write_ringbuff(struct ringbuff_s *dst, uint8_t *src, size_t srclen){
-    if(!dst || !dst->buff || !src){
-        return SUCCESS;
-    }
+size_t write_ringbuff(Ringbuff *dst, uint8_t *src, size_t srclen){
     size_t free = dst->capacity - dst->used;
     if(srclen > free){ // Not enough space, no partial writes
-        return SUCCESS;
+        return 0;
     }
     size_t first_write = dst->capacity - dst->writehead;
     if(first_write > srclen){
@@ -32,9 +34,9 @@ size_t write_ringbuff(struct ringbuff_s *dst, uint8_t *src, size_t srclen){
     return srclen;
 }
 
-size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen){
-    if(!src || !src->buff || !dst || src->used == 0){
-        return SUCCESS;
+size_t peek_ringbuff(Ringbuff *src, uint8_t *dst, size_t dstlen){
+    if(src->used == 0){
+        return 0;
     }
     if(src->used < dstlen){
         dstlen = src->used;
@@ -52,9 +54,9 @@ size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen){
     return dstlen;
 }
 
-size_t consume_ringbuff(struct ringbuff_s *src, size_t consume){
-    if(!src || !src->buff || src->used == 0){
-        return SUCCESS;
+size_t consume_ringbuff(struct Ringbuff *src, size_t consume){
+    if(src->used == 0){
+        return 0;
     }
     if(consume > src->used){
         consume = src->used;
@@ -67,47 +69,75 @@ size_t consume_ringbuff(struct ringbuff_s *src, size_t consume){
 
 int ep_add_listener(int epoll_fd, int fd){
     struct epoll_event ev;
-    struct epoll_data_s *data = malloc(sizeof(struct epoll_data_s));
+    Data *data = malloc(sizeof(Data));
     if(data == NULL){
-        return NULLCHK_ERR;
+        log_error(L_MALLOCERROR);
+        return -1;
     }
     memset(&ev, 0, sizeof(ev));
-    memset(data, 0, sizeof(struct epoll_data_s));
+    memset(data, 0, sizeof(Data));
 
-    data->is_listener = TYPE_ISLISTENER;
+    data->type = TYPE_LISTENER;
     data->self_fd = fd;
     data->shared = NULL;
     ev.events = EPOLLIN;
     ev.data.ptr = data;
 
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
+        log_error(L_EPOLLERRORADD);
         free(data);
-        return EPOLLCTL_ERR;
+        return -1;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
-int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data){
+int ep_add_resolver(int epoll_fd){
+    struct epoll_event ev;
+    Data *data = malloc(sizeof(Data));
+    if(!data){
+        log_error(L_MALLOCERROR);
+        return -1;
+    }
+    memset(&ev, 0, sizeof(ev));
+    memset(data, 0, sizeof(Data));
+
+    data->type = TYPE_RESOLVER;
+    data->self_fd  = resolver.rout_pipe;
+    data->shared = NULL;
+    ev.events = EPOLLIN;
+    ev.data.ptr = data;
+
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, resolver.rout_pipe, &ev) == -1){
+        return -1;
+    }
+
+    return 0;
+
+}
+
+int ep_add_new_client(int epoll_fd, int fd, Data *data){
     struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
-        return EPOLLCTL_ERR;
+        log_error(L_EPOLLERRORADD);
+        return -1;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
-int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data){
+int ep_connecting(int epoll_fd, int fd, void *data){
     struct epoll_event ev;
     ev.events = EPOLLOUT;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1){
-        return EPOLLCTL_ERR;
+        log_error(L_EPOLLERRORADD);
+        return -1;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
 int ep_waiting_send(int epoll_fd, int fd, void *data){
@@ -115,10 +145,11 @@ int ep_waiting_send(int epoll_fd, int fd, void *data){
     ev.events = EPOLLIN | EPOLLOUT;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
-        return EPOLLCTL_ERR;
+        log_error(L_EPOLLERRORMOD);
+        return -1;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
 int ep_done_sending(int epoll_fd, int fd, void *data){
@@ -126,13 +157,47 @@ int ep_done_sending(int epoll_fd, int fd, void *data){
     ev.events = EPOLLIN;
     ev.data.ptr = data;
     if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev) == -1){
-        return EPOLLCTL_ERR;
+        log_error(L_EPOLLERRORMOD);
+        return -1;
     }
 
-    return SUCCESS;
+    return 0;
 }
 
 int ep_delete_fd(int epoll_fd, int fd){
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-    return SUCCESS;
+
+    return 0;
+}
+
+void free_data(Data *data){
+    if(data->shared->info){
+        if(data->shared->info->sa){
+            free(data->shared->info->sa);
+        }
+        if(data->shared->info->ai){
+            freeaddrinfo(data->shared->info->ai);
+        }
+        free(data->shared->info);
+        data->shared->info = NULL;
+    }
+    if(data->shared->ptr){
+        free(data->shared->ptr);
+        data->shared->ptr = NULL;
+    }
+    free(data->shared->client_out.buff);
+    free(data->shared->server_out.buff);
+    data->shared->client_out.buff = NULL;
+    data->shared->server_out.buff = NULL;
+
+    if(data->self_fd == data->shared->client_fd){
+        data->shared->client_data = NULL;
+    }
+    if(data->self_fd == data->shared->server_fd){
+        data->shared->server_data = NULL;
+    }
+    if(!data->shared->client_data && !data->shared->server_data){
+        free(data->shared);
+    }
+    free(data);
 }

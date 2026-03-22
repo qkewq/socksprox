@@ -59,6 +59,9 @@ method = no-auth
 # method = gssapi (not yet)
 EOF
 
+    else
+        mv socksprox.conf /etc/socksprox.conf
+    fi
 fi
 
 echo "Installation Complete."

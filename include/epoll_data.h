@@ -3,69 +3,78 @@
 
 #define OUTBUFFSIZE 4096
 
-#define TYPE_ISLISTENER 0x00
-#define TYPE_NOLISTENER 0x01
+#define TYPE_LISTENER   0x00
+#define TYPE_PEER       0x01
+#define TYPE_RESOLVER   0x02
 
-#define STATE_STATELESS         0x00
-#define STATE_LISTENING         0x01
-#define STATE_WAITINGMETHODS    0x02
-#define STATE_SENDINGMETHOD     0x03
-#define STATE_AUTHENTICATING    0x04
-#define STATE_WAITINGCOMMAND    0x05
-#define STATE_CONNECTING        0x06
-#define STATE_BINDLISTENING     0x07
-#define STATE_SENDINGREPLY      0x08
-#define STATE_SENDINGREPLY_2    0x09
-#define STATE_HALF              0x0A
-#define STATE_FULL              0x0B
-#define STATE_HALFCLOSE         0x0C
-#define STATE_FULLCLOSE         0x0D
-#define STATE_RDCLOSE           0x0E
-#define STATE_WRCLOSE           0x0F
+#define STATE_NO_STATE          0x00
+#define STATE_WAITING_METHODS   0x01
+#define STATE_SENDING_METHOD    0x02
+#define STATE_AUTHENTICATING    0x03
+#define STATE_WAITING_COMMAND   0x04
+#define STATE_ASYNC_DNS         0x05
+#define STATE_SENDING_REPLY     0x06
+#define STATE_SENDING_REPLY_2   0x07
+#define STATE_CONNECTING        0x08
+#define STATE_BIND_LISTENING    0x09
+#define STATE_FULL              0x0A
+#define STATE_FULL_UDPA         0x0B
+#define STATE_HALF_CLOSE        0x0C
+#define STATE_CLOSED            0x0D
 
-struct req_info_s{
+#define FLAG_READ_CLOSED        0x01
+#define FLAG_WRITE_CLOSED       0x02
+#define FLAG_FLUSHING           0x04
+
+typedef struct Info{
     uint8_t method;
     uint8_t rep;
     uint8_t cmd;
+    uint8_t atyp;
+    int resolver_ret;
     int ai_index;
     struct addrinfo *ai;
     struct sockaddr *sa;
-};
+} Info;
 
-struct ringbuff_s{
+typedef struct Ringbuff{
     uint8_t *buff;
     size_t readhead;
     size_t writehead;
     size_t capacity;
     size_t used;
-};
+} Ringbuff;
 
-struct shared_data_s{
-    int clientfd;
-    uint8_t cfd_state;
-    int serverfd;
-    uint8_t sfd_state;
-    struct ringbuff_s c_outbuff;
-    struct ringbuff_s s_outbuff; //Will act as inbuff during handshake
-    struct epoll_data_s *c_data;
-    struct epoll_data_s *s_data;
+typedef struct Shared{
+    uint8_t state;
+    int client_fd;
+    int server_fd;
+    struct Ringbuff client_out;
+    struct Ringbuff server_out; //Will act as inbuff during handshake
+    struct Data *client_data;
+    struct Data *server_data;
+    uint8_t client_flags;
+    uint8_t server_flags;
+    struct Info *info;
     void *ptr;
-};
+} Shared;
 
-struct epoll_data_s{
-    uint8_t is_listener;
+typedef struct Data{
+    uint8_t type;
     int self_fd;
-    struct shared_data_s *shared;
-};
+    struct Shared *shared;
+} Data;
 
-size_t write_ringbuff(struct ringbuff_s *dst, uint8_t *src, size_t srclen);
-size_t peek_ringbuff(struct ringbuff_s *src, uint8_t *dst, size_t dstlen);
-size_t consume_ringbuff(struct ringbuff_s *src, size_t consume);
+size_t write_ringbuff(struct Ringbuff *dst, uint8_t *src, size_t srclen);
+size_t peek_ringbuff(struct Ringbuff *src, uint8_t *dst, size_t dstlen);
+size_t consume_ringbuff(struct Ringbuff *src, size_t consume);
 int ep_add_listener(int epoll_fd, int fd);
-int ep_add_new_client(int epoll_fd, int fd, struct epoll_data_s *data);
-int ep_connecting(int epoll_fd, int fd, struct epoll_data_s *data);
+int ep_add_resolver(int epoll_fd);
+int ep_add_new_client(int epoll_fd, int fd, Data *data);
+int ep_connecting(int epoll_fd, int fd, void *data);
 int ep_waiting_send(int epoll_fd, int fd, void *data);
 int ep_done_sending(int epoll_fd, int fd, void *data);
 int ep_delete_fd(int epoll_fd, int fd);
+void free_data(Data *data);
 
 #endif

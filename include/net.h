@@ -1,19 +1,17 @@
 #ifndef NET_H
 #define NET_H
 
-struct configs_s;
-struct shared_data_s;
-struct epoll_data_s;
+typedef struct Configs Configs;
+typedef struct Shared Shared;
+typedef struct Data Data;
+typedef struct Sockaddr_ll Sockaddr_ll;
 
 void fd_nonblocking(int fd);
-int init_listeners(int epoll_fd, struct configs_s *configs);
-int listen_err(int epoll_fd, uint32_t ev, struct epoll_data_s *data);
+int init_listeners(int epoll_fd, Sockaddr_ll *current);
+int listen_err(int epoll_fd, uint32_t ev, Data *data);
 int accept_new_client(int epoll_fd, int fd);
-int init_connect(int epoll_fd, struct shared_data_s *shared);
-int init_bind(int epoll_fd, struct shared_data_s *shared);
+int init_connect(int epoll_fd, Shared *shared);
+int init_bind(int epoll_fd, Shared *shared, Configs *configs);
 int init_udpa();
-int recv_eof(struct epoll_data_s *data);
-int read_data(int self_fd, struct epoll_data_s *data);
-int send_data(int self_fd, struct epoll_data_s *data);
 
 #endif

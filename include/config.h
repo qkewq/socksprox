@@ -1,34 +1,27 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define E_CONFIGOPEN 0x01
-#define E_ADDRMALLOC 0x02
-#define E_CNFNOADDRS 0x04
-#define E_CNFNOPORTN 0x08
-#define E_CNFNOA_LOG 0x10
-#define E_CNFNOE_LOG 0x20
-#define E_CNFNOMXCON 0x40
-#define E_CNFNOMETHS 0x80
+#define CONFIG_FILE "/etc/socksprox.conf"
 
 #define METH_NOAUTH 0x00
 #define METH_GSSAPI 0x01
 #define METH_USERPW 0x02
 #define METH_NOMETH 0xFF
 
-struct listen_addrs_s{
-    struct listen_addrs_s *next;
-    struct addrinfo *addr;
-};
+typedef struct Sockaddr_ll{
+    struct Sockaddr_ll *next;
+    int addrlen;
+    struct sockaddr *sa;
+} Sockaddr_ll;
 
-struct block_adds_s{
+typedef struct Blockaddr_ll{
     int mask;
-    struct sockaddr sa;
-    struct block_adds_s *next;
-}
+    struct sockaddr *sa;
+    struct Blockaddr_ll *next;
+} Blockaddr_ll;
 
-struct configs_s{
-    struct listen_addrs_s *addrs; // Linked list of addrinfo structs (which may be linked lists)
-    uint16_t port; // Listen port
+typedef struct Configs{
+    Sockaddr_ll *listen_head; // Linked list of addresses to listen on
     char a_log[255]; // Path to access log
     char e_log[255]; // Path to error log
     int max_conns; // Maximum allowable connections
@@ -37,11 +30,14 @@ struct configs_s{
     uint8_t allow_bind;
     uint8_t allow_udpassoc;
     uint8_t methods[255]; // Identifier octets for auth methods set to 1
-    struct listen_addrs_s *bind_addrs;
-};
+    Sockaddr_ll *bind_advertise;
+    Sockaddr_ll *bind_listen;
+    Sockaddr_ll *udpa_advertise;
+    Sockaddr_ll *udpa_listen;
+    Blockaddr_ll *block_head;
+} Configs;
 
-uint16_t parse_configs(struct configs_s *configs);
-void free_config_addrs(struct configs_s *configs);
-int test_configs(void);
+int parse_configs(Configs *configs);
+void free_configs(Configs *configs);
 
 #endif
