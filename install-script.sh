@@ -9,6 +9,7 @@ while getopts ${OPTSRING} opt; do
     case ${opt} in
         h)
             echo "Usage $0 [-h] [-c </path/to/config>]"
+            exit 0
             ;;
         c)
             CONFIG_FILE="$OPTARG"
@@ -23,25 +24,22 @@ while getopts ${OPTSRING} opt; do
     esac
 done
 
-if [ ! -f "build/socksprox" ]; then
-    echo "socksprox not found in build/socksprox"
-    echo "Try running \"make\" to build"
-    exit 0
-fi
+echo "building socksprox"
+make
 
 if [ ! -x "build/socksprox" ]; then
     echo "Making socksprox executable"
     chmod +x build/socksprox
 fi
 
-if [ -f "/etc/socksprox.conf" ]; then
-    echo "Config file found in /etc/socksprox.conf"
+if [ -f "${CONFIG_FILE}" ]; then
+    echo "Config file found in ${CONFIG_FILE}"
     echo "Leaving configs as is"
 else
-    echo "Placing configs in /etc/socksprox.conf"
+    echo "Placing configs in ${CONFIG_FILE}"
     if [ ! -f "socksprox.conf" ]; then
         echo "Configs not found, using defaults"
-        cat <<EOF >> /etc/socksprox.conf
+        cat <<EOF >> ${CONFIG_FILE}
 # Configuration for the socksprox SOCKS5 server
 # socksprox "follows" rfc 1928
 # Run "socksprox -t" to test this config file
@@ -81,7 +79,7 @@ method = no-auth
 EOF
 
     else
-        mv socksprox.conf /etc/socksprox.conf
+        mv socksprox.conf ${CONFIG_FILE}
     fi
 fi
 
