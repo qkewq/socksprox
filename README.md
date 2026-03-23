@@ -1,5 +1,4 @@
 ```mermaid
-
 flowchart TD
 	START --> configs["Parse configs subroutine"]
 	configs --> logger["Start logger thread"]

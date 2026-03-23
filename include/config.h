@@ -9,32 +9,32 @@
 #define METH_NOMETH 0xFF
 
 typedef struct Sockaddr_ll{
-    struct Sockaddr_ll *next;
-    int addrlen;
-    struct sockaddr *sa;
+	struct Sockaddr_ll *next;
+	int addrlen;
+	struct sockaddr *sa;
 } Sockaddr_ll;
 
 typedef struct Blockaddr_ll{
-    int mask;
-    struct sockaddr *sa;
-    struct Blockaddr_ll *next;
+	int mask;
+	struct sockaddr *sa;
+	struct Blockaddr_ll *next;
 } Blockaddr_ll;
 
 typedef struct Configs{
-    Sockaddr_ll *listen_head; // Linked list of addresses to listen on
-    char a_log[255]; // Path to access log
-    char e_log[255]; // Path to error log
-    int max_conns; // Maximum allowable connections
-    uint8_t allow_domains; // Allow domain name requests
-    uint8_t allow_connect;
-    uint8_t allow_bind;
-    uint8_t allow_udpassoc;
-    uint8_t methods[255]; // Identifier octets for auth methods set to 1
-    Sockaddr_ll *bind_advertise;
-    Sockaddr_ll *bind_listen;
-    Sockaddr_ll *udpa_advertise;
-    Sockaddr_ll *udpa_listen;
-    Blockaddr_ll *block_head;
+	Sockaddr_ll *listen_head; // Linked list of addresses to listen on
+	char a_log[255]; // Path to access log
+	char e_log[255]; // Path to error log
+	int max_conns; // Maximum allowable connections
+	uint8_t allow_domains; // Allow domain name requests
+	uint8_t allow_connect;
+	uint8_t allow_bind;
+	uint8_t allow_udpassoc;
+	uint8_t methods[255]; // Identifier octets for auth methods set to 1
+	Sockaddr_ll *bind_advertise;
+	Sockaddr_ll *bind_listen;
+	Sockaddr_ll *udpa_advertise;
+	Sockaddr_ll *udpa_listen;
+	Blockaddr_ll *block_head;
 } Configs;
 
 int parse_configs(Configs *configs);

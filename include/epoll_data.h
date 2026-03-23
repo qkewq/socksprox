@@ -27,42 +27,42 @@
 #define FLAG_FLUSHING           0x04
 
 typedef struct Info{
-    uint8_t method;
-    uint8_t rep;
-    uint8_t cmd;
-    uint8_t atyp;
-    int resolver_ret;
-    int ai_index;
-    struct addrinfo *ai;
-    struct sockaddr *sa;
+	uint8_t method;
+	uint8_t rep;
+	uint8_t cmd;
+	uint8_t atyp;
+	int resolver_ret;
+	int ai_index;
+	struct addrinfo *ai;
+	struct sockaddr *sa;
 } Info;
 
 typedef struct Ringbuff{
-    uint8_t *buff;
-    size_t readhead;
-    size_t writehead;
-    size_t capacity;
-    size_t used;
+	uint8_t *buff;
+	size_t readhead;
+	size_t writehead;
+	size_t capacity;
+	size_t used;
 } Ringbuff;
 
 typedef struct Shared{
-    uint8_t state;
-    int client_fd;
-    int server_fd;
-    struct Ringbuff client_out;
-    struct Ringbuff server_out; //Will act as inbuff during handshake
-    struct Data *client_data;
-    struct Data *server_data;
-    uint8_t client_flags;
-    uint8_t server_flags;
-    struct Info *info;
-    void *ptr;
+	uint8_t state;
+	int client_fd;
+	int server_fd;
+	struct Ringbuff client_out;
+	struct Ringbuff server_out; //Will act as inbuff during handshake
+	struct Data *client_data;
+	struct Data *server_data;
+	uint8_t client_flags;
+	uint8_t server_flags;
+	struct Info *info;
+	void *ptr;
 } Shared;
 
 typedef struct Data{
-    uint8_t type;
-    int self_fd;
-    struct Shared *shared;
+	uint8_t type;
+	int self_fd;
+	struct Shared *shared;
 } Data;
 
 size_t write_ringbuff(struct Ringbuff *dst, uint8_t *src, size_t srclen);

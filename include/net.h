@@ -5,6 +5,7 @@ typedef struct Configs Configs;
 typedef struct Shared Shared;
 typedef struct Data Data;
 typedef struct Sockaddr_ll Sockaddr_ll;
+typedef struct Ringbuff Ringbuff;
 
 void fd_nonblocking(int fd);
 int init_listeners(int epoll_fd, Sockaddr_ll *current);
@@ -13,5 +14,7 @@ int accept_new_client(int epoll_fd, int fd);
 int init_connect(int epoll_fd, Shared *shared);
 int init_bind(int epoll_fd, Shared *shared, Configs *configs);
 int init_udpa();
+int send_traffic(int fd, Ringbuff *outbuff);
+int read_traffic(int fd, Ringbuff *outbuff);
 
 #endif

@@ -36,10 +36,10 @@
 typedef struct Configs Configs;
 
 typedef struct Logger{
-    char *a_log_path;
-    char *e_log_path;
-    int r_pipe;
-    int w_pipe;
+	char *a_log_path;
+	char *e_log_path;
+	int r_pipe;
+	int w_pipe;
 } Logger;
 
 extern Logger logger;

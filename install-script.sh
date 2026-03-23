@@ -6,40 +6,40 @@ OPTSTRING=":hc:"
 CONFIG_FILE="/etc/socksprox.conf"
 
 while getopts ${OPTSRING} opt; do
-    case ${opt} in
-        h)
-            echo "Usage $0 [-h] [-c </path/to/config>]"
-            exit 0
-            ;;
-        c)
-            CONFIG_FILE="$OPTARG"
-            echo "Changing default configs location to ${OPTARG}"
-            SED_STR="s|#define CONFIG_FILE .*|#define CONFIG_FILE \"${CONFIG_FILE}\"|g"
-            sed -i "${SED_STR}" include/config.h
-            ;;
-        :)
-            echo "Option -${OPTARG} requires argument"
-            exit 0
-            ;;
-    esac
+	case ${opt} in
+		h)
+			echo "Usage $0 [-h] [-c </path/to/config>]"
+			exit 0
+			;;
+		c)
+			CONFIG_FILE="$OPTARG"
+			echo "Changing default configs location to ${OPTARG}"
+			SED_STR="s|#define CONFIG_FILE .*|#define CONFIG_FILE \"${CONFIG_FILE}\"|g"
+			sed -i "${SED_STR}" include/config.h
+			;;
+		:)
+			echo "Option -${OPTARG} requires argument"
+			exit 0
+			;;
+	esac
 done
 
 echo "building socksprox"
 make
 
 if [ ! -x "build/socksprox" ]; then
-    echo "Making socksprox executable"
-    chmod +x build/socksprox
+	echo "Making socksprox executable"
+	chmod +x build/socksprox
 fi
 
 if [ -f "${CONFIG_FILE}" ]; then
-    echo "Config file found in ${CONFIG_FILE}"
-    echo "Leaving configs as is"
+	echo "Config file found in ${CONFIG_FILE}"
+	echo "Leaving configs as is"
 else
-    echo "Placing configs in ${CONFIG_FILE}"
-    if [ ! -f "socksprox.conf" ]; then
-        echo "Configs not found, using defaults"
-        cat <<EOF >> ${CONFIG_FILE}
+	echo "Placing configs in ${CONFIG_FILE}"
+	if [ ! -f "socksprox.conf" ]; then
+		echo "Configs not found, using defaults"
+		cat <<EOF >> ${CONFIG_FILE}
 # Configuration for the socksprox SOCKS5 server
 # socksprox "follows" rfc 1928
 # Run "socksprox -t" to test this config file
@@ -78,9 +78,9 @@ method = no-auth
 # method = gssapi (not yet)
 EOF
 
-    else
-        mv socksprox.conf ${CONFIG_FILE}
-    fi
+	else
+		mv socksprox.conf ${CONFIG_FILE}
+	fi
 fi
 
 echo "Installation Complete."
