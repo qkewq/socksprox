@@ -3,16 +3,16 @@
  A socks5 server built for Linux in C.
 
 ## Table of Contents
-- [Quick Install](#install)
-- [Config File](#config)
-- [Authentication Methods](#methods)
+- [Quick Install](#quick-install)
+- [Config File](#config-file)
+- [Authentication Methods](#authentication-methods)
 - [Logs](#logs)
-- [The SOCKS Protocol](#socks)
+- [The SOCKS Protocol](#the-socks-protocol)
   - [Handshake](#handshake)
   - [Commands](#commands)
     - [Connect](#connect)
     - [Bind](#bind)
-    - [UDP Associate](#udpa)
+    - [UDP Associate](#udp-associate)
 
 ## Quick Install
 ```bash
@@ -39,7 +39,7 @@ The default config file location for socksprox is `/etc/socksprox.conf`, this ca
 |udp-advertise-address|<ipv4\|v6>|The ip address to use in the reply to clients who request udp associate|
 |udp-listen-address|<ipv4\|v6>|The ip address to actually listen on for the udp associate command|
 |max-connections|<integer\>|The maximum connection at one time on the server|
-|method|<method\>|The allowable authentication methods for the socks handshake (see methods in this readme)|
+|method|<method\>|The allowable authentication methods for the socks handshake (See [Authentication Methods](#authentication-methods))|
 |block|<ipv4\|v6>/mask|List of ip address in cidr notation that the server should refuse to connect to|
 
 ## Authentication Methods
