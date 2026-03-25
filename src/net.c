@@ -347,10 +347,60 @@ int init_udpa(){
 
 }
 
-int send_traffic(int fd, Ringbuff *outbuff){ // Sets flags on halfclose
+int send_traffic(int fd, Shared *shared){ // Sets flags on halfclose
+	Ringbuff *outbuff = NULL;
+	uint8_t *flags = NULL;
+	if(fd == shared->client_fd){
+		outbuff = shared->client_out;
+		flags = &shared->client_flags;
+	}
+	else if(fd == shared->server_fd){
+		outbuff = shared->server_out;
+		flag = &shared->server_flags;
+	}
+	if(!outbuff || !flags){
+		return -1;
+	}
 
+	uint8_t buffer[outbuff->used];
+	peek_ringbuff(outbuff, buffer, outbuff->used);
+	int ret = send(fd, buffer, outbuff->used);
+	if(ret == -1){
+		*flags |= FLAG_WRITE_CLOSED;
+		shutdown(fd, SHUT_WR);
+		return -1;
+	}
+	consume_ringbuff(outbuff, ret);
+
+	return outbuff->used;
 }
 
-int read_traffic(int fd, Ringbuff *outbuff){ // Sets flags on halfclose
+int read_traffic(int fd, Shared *shared){ // Sets flags on halfclose
+	Ringbuff *outbuff = NULL;
+	uint8_t *flags = NULL;
+	uint8_t *peer_flags = NULL;
+	if(fd == shared->client_fd){
+		outbuff = shared->server_out;
+		flags = &shared->client_flags;
+		peer_flags = &shared->server_flags;
+	}
+	else if(fd == shared->server_fd){
+		outbuff = shared->client_fd;
+		flag = &shared->server_flags;
+		peer_flags = &shared->client_flags;
+	}
+	if(!outbuff || !flags){
+		return -1;
+	}
 
+	uint8_t buffer[1024];
+	int ret = read(fd, buffer, sizeof(buffer), 0);
+	if(ret <= 0){
+		*flags |= FLAG_READ_CLOSED
+		*peer_flags |= FLAG_FLUSHING;
+		shutdown(fd, SHUT_RD);
+		return -1;
+	}
+	write_ringbuff(outbuff, buffer, ret);
+	return ret;
 }

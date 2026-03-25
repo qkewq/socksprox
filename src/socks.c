@@ -621,9 +621,10 @@ int full(int epoll_fd, Data *data, uint32_t ev){
 		}
 		if(ret == 0){
 			if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
-				return 0;
+				data->shared->state = STATE_CLOSED;
 			}
 		}
+		return 0;
 	}
 	if(ev & EPOLLIN){
 		int ret = read_traffic(data->self_fd, data->shared);

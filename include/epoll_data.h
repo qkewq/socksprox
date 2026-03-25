@@ -47,8 +47,8 @@ typedef struct Ringbuff{
 
 typedef struct Shared{
 	uint8_t state;
-	int client_fd;
-	int server_fd;
+	int client_fd; // Or UDP Associate control connection
+	int server_fd; // Or UDP Relay port
 	struct Ringbuff client_out;
 	struct Ringbuff server_out; //Will act as inbuff during handshake
 	struct Data *client_data;
