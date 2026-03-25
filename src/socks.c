@@ -81,7 +81,7 @@ int init_command(int epoll_fd, Data *data, Configs *configs){
 				reply_with_err(epoll_fd, data);
 				return 0;
 			}
-			init_udpa();
+			init_udpa(epoll_fd, data->shared, configs);
 			break;
 		default:
 			info->rep = REP_BADCOMM;
@@ -368,8 +368,8 @@ int sendingreply(int epoll_fd, Data *data, uint32_t ev){
 				data->shared->state = STATE_FULL;
 			}
 			break;
-		case CMD_UDPA: //!!
-			return -1;
+		case CMD_UDPA:
+			data->shared->state = STATE_FULL_UDPA;
 			break;
 	}
 
@@ -613,6 +613,10 @@ int closed(int epoll_fd, Data *data){
 	return 0;
 }
 
+int half_close(int epoll_fd, Data *data, uint32_t ev){
+return -1;
+}
+
 int full(int epoll_fd, Data *data, uint32_t ev){
 	if(ev & EPOLLOUT){
 		int ret = send_traffic(data->self_fd, data->shared);
@@ -631,12 +635,26 @@ int full(int epoll_fd, Data *data, uint32_t ev){
 		if(ret == -1){
 			data->shared->state = STATE_HALF_CLOSE;
 		}
-		if(ep_waiting_send(epoll_fd, data->self_fd, data) == -1){
+		int pfd;
+		Data *pdata;
+		if(data->self_fd == data->shared->client_fd){
+			pfd = data->shared->server_fd;
+			pdata = data->shared->server_data;
+		}
+		else{
+			pfd = data->shared->client_fd;
+			pdata = data->shared->client_data;
+		}
+		if(ep_waiting_send(epoll_fd, pfd, pdata) == -1){
 			return 0;
 		}
 	}
 
 	return 0;
+}
+
+int full_udpa(int epoll_fd, Data *data, uint32_t ev){
+return -1;
 }
 
 uint16_t socks5(int epoll_fd, struct epoll_event *event, Configs *configs){
@@ -677,8 +695,12 @@ uint16_t socks5(int epoll_fd, struct epoll_event *event, Configs *configs){
 			break;
 		case STATE_FULL:
 			ret = full(epoll_fd, data, ev);
+			break;
 		case STATE_FULL_UDPA:
+			ret = full_udpa(epoll_fd, data, ev);
 		case STATE_HALF_CLOSE:
+			ret = half_close(epoll_fd, data, ev);
+			break;
 		case STATE_CLOSED:
 			ret = closed(epoll_fd, data);
 			break;

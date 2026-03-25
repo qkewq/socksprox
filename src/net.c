@@ -266,7 +266,7 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 	}
 
 	struct Sockaddr_ll *advertise_addr = configs->bind_advertise;
-	while(configs->bind_advertise){
+	while(advertise_addr){
 		if(advertise_addr->sa->sa_family == af){
 			break;
 		}
@@ -343,20 +343,123 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 	return 0;
 }
 
-int init_udpa(){
+int init_udpa(int epoll_fd, Shared *shared, Configs *configs){
+	Info *info = shared->info;
+	if(!info->sa && !info->ai){
+		info->rep = REP_GENFAIL;
+		return 0;
+	}
 
+	int af = -1;
+	if(info->sa){
+		af = info->sa->sa_family;
+	}
+	else if(info->ai){
+		af = info->ai->ai_family;
+	}
+
+	int sfd = socket(af, SOCK_DGRAM, 0);
+	if(sfd == -1){
+		info->rep = REP_GENFAIL;
+		return 0;
+	}
+
+	struct Sockaddr_ll *listen_addr = configs->udpa_listen;
+	while(listen_addr){
+		if(listen_addr->sa->sa_family == af){
+			break;
+		}
+		listen_addr = listen_addr->next;
+	}
+	if(!listen_addr){
+		info->rep = REP_BADATYP;
+		close(sfd);
+		return 0;
+	}
+
+	struct Sockaddr_ll *advertise_addr = configs->udpa_advertise;
+	while(advertise_addr){
+		if(advertise_addr->sa->sa_family == af){
+			break;
+		}
+		advertise_addr = advertise_addr->next;
+	}
+	if(!advertise_addr){
+		info->rep = REP_BADATYP;
+		close(sfd);
+		return 0;
+	}
+
+	if(bind(sfd, listen_addr->sa, listen_addr->addrlen) == -1){
+		info->rep = REP_GENFAIL;
+		close(sfd);
+		return 0;
+	}
+
+	Data *data = malloc(sizeof(Data));
+	if(!data){
+		log_error(L_MALLOCERROR);
+		info->rep = REP_GENFAIL;
+		close(sfd);
+		return 0;
+	}
+
+	data->type = TYPE_PEER;
+	data->self_fd = sfd;
+	data->shared = shared;
+	shared->server_data = data;
+	shared->server_fd = sfd;
+
+	info->rep = REP_SUCCESS;
+	uint8_t rep_info[3] = {0};
+	rep_info[0] = SOCKS5_VERSION;
+	rep_info[1] = info->rep;
+	rep_info[2] = SOCKS5_RESV;
+	write_ringbuff(&shared->client_out, rep_info, sizeof(rep_info));
+
+	uint8_t atype = 0;
+	if(af == AF_INET){
+		struct sockaddr_in *sa = (struct sockaddr_in *)advertise_addr;
+		atype = ATYP_IPV4;
+		write_ringbuff(&shared->client_out, &atype, 1);
+		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin_addr, 4);
+		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin_port, 2);
+		if(ep_waiting_send(epoll_fd, shared->client_fd, shared->client_data) == -1){
+			info->rep = REP_GENFAIL;
+			return 0;
+		}
+	}
+	else if(af == AF_INET6){
+		struct sockaddr_in6 *sa = (struct sockaddr_in6 *)advertise_addr;
+		atype = ATYP_IPV6;
+		write_ringbuff(&shared->client_out, &atype, 1);
+		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin6_addr, 16);
+		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin6_port, 2);
+		if(ep_waiting_send(epoll_fd, shared->client_fd, shared->client_data) == -1){
+			info->rep = REP_GENFAIL;
+			return 0;
+		}
+	}
+
+	consume_ringbuff(&shared->server_out, OUTBUFFSIZE); // Clear temp inbuff
+	if(ep_add_new_client(epoll_fd, sfd, data) == -1){
+		info->rep = REP_GENFAIL;
+	}
+	shared->state = STATE_SENDING_REPLY;
+
+	return 0;
 }
 
 int send_traffic(int fd, Shared *shared){ // Sets flags on halfclose
 	Ringbuff *outbuff = NULL;
 	uint8_t *flags = NULL;
 	if(fd == shared->client_fd){
-		outbuff = shared->client_out;
+		outbuff = &shared->client_out;
 		flags = &shared->client_flags;
 	}
 	else if(fd == shared->server_fd){
-		outbuff = shared->server_out;
-		flag = &shared->server_flags;
+		outbuff = &shared->server_out;
+		flags = &shared->server_flags;
 	}
 	if(!outbuff || !flags){
 		return -1;
@@ -364,7 +467,7 @@ int send_traffic(int fd, Shared *shared){ // Sets flags on halfclose
 
 	uint8_t buffer[outbuff->used];
 	peek_ringbuff(outbuff, buffer, outbuff->used);
-	int ret = send(fd, buffer, outbuff->used);
+	int ret = send(fd, buffer, outbuff->used, 0);
 	if(ret == -1){
 		*flags |= FLAG_WRITE_CLOSED;
 		shutdown(fd, SHUT_WR);
@@ -380,13 +483,13 @@ int read_traffic(int fd, Shared *shared){ // Sets flags on halfclose
 	uint8_t *flags = NULL;
 	uint8_t *peer_flags = NULL;
 	if(fd == shared->client_fd){
-		outbuff = shared->server_out;
+		outbuff = &shared->server_out;
 		flags = &shared->client_flags;
 		peer_flags = &shared->server_flags;
 	}
 	else if(fd == shared->server_fd){
-		outbuff = shared->client_fd;
-		flag = &shared->server_flags;
+		outbuff = &shared->client_out;
+		flags = &shared->server_flags;
 		peer_flags = &shared->client_flags;
 	}
 	if(!outbuff || !flags){
@@ -394,9 +497,9 @@ int read_traffic(int fd, Shared *shared){ // Sets flags on halfclose
 	}
 
 	uint8_t buffer[1024];
-	int ret = read(fd, buffer, sizeof(buffer), 0);
+	int ret = recv(fd, buffer, sizeof(buffer), 0);
 	if(ret <= 0){
-		*flags |= FLAG_READ_CLOSED
+		*flags |= FLAG_READ_CLOSED;
 		*peer_flags |= FLAG_FLUSHING;
 		shutdown(fd, SHUT_RD);
 		return -1;
