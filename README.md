@@ -23,7 +23,7 @@ make
 ```
 
 ## Config File
-The default config file location for socksprox is `/etc/socksprox.conf`, this can be changed by editing the value of `CONFIG_FILE` in `include/config.h` before running `make`.  The config parser follows most of the rules of ini.  Comments are lines whose first non-whitespace character is either a pound sign (#) or a semi-colon ";".  All leading and trailing whitespace is ignored.  Keys and values are separated by either white space " " or an equals sign "=".  Spaces around the equals sign are ignored.  There will often be more than one of the same key for ip addresses and methods, for example including both `listen = 0.0.0.0_1080` and `listen ::_1080` is valid.  See `socksprox.conf` for default values and explanations.
+The default config file location for socksprox is `/etc/socksprox.conf`, this can be changed by editing the value of `CONFIG_FILE` in `include/config.h` before running `make`.  The config parser follows most of the rules of ini.  Comments are lines whose first non-whitespace character is either a pound sign (#) or a semi-colon (\;).  All leading and trailing whitespace is ignored.  Keys and values are separated by either white space or an equals sign (=).  Spaces around the equals sign are ignored.  There will often be more than one of the same key for ip addresses and methods, for example including both `listen = 0.0.0.0_1080` and `listen ::_1080` is valid.  See `socksprox.conf` for default values and explanations.
 
 |Key|Value|Note|
 |-|-|-|
@@ -62,7 +62,7 @@ Error logs have the format `yyyy-mm-dd-hh:mm:ss-LEVEL|MNEMONIC-Message`.  Error 
 
 # The SOCKS Protocol
 
-The SOCKS Version 5 Protocol is defined in [RFC 1928](https://datatracker.ietf.org/doc/html/rfc1928).  The standard defines the the SOCKS handshake as well as what commands can be sent to the server.  The registered port for SOCKS is `TCP:1080`.
+The SOCKS Version 5 Protocol is defined in [RFC 1928](https://datatracker.ietf.org/doc/html/rfc1928).  The standard defines the SOCKS handshake as well as what commands can be sent to the server.  The registered port for SOCKS is `TCP:1080`.
 
 ## Handshake
 Once the client has completed the TCP handshake with the server the SOCKS hand shake begins.  The `method request` is the first message sent to the server by the client.  The first byte is always `0x05` to represent SOCKS version 5.  The second byte specifies the number of bytes that will follow, between 1 and 255.  The following bytes are method specifier octets, these specify the authentication methods the client is requesting to use to connect to the server.  The defined methods are `0x00 No Authentication`, `0x01 GSSAPI`, and `0x02 Username\Password`.
@@ -103,7 +103,7 @@ sequenceDiagram
 	participant C as Client
 	participant P as Proxy
 	participant S as Server
-	C<<->>P: TCP Handshake
+	C->>P: TCP Handshake
 	C->>P: Method Request
 	P->>C: Method Response
 	C<<-->>P: Subnegotiation
@@ -123,7 +123,7 @@ sequenceDiagram
 	participant C as Client
 	participant P as Proxy
 	participant S as Server
-	C<<->>P: TCP Handshake
+	C->>P: TCP Handshake
 	C->>P: Method Request
 	P->>C: Method Response
 	C<<-->>P: Subnegotiation
