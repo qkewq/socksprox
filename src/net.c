@@ -304,6 +304,14 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 	shared->server_data = data;
 	shared->server_fd = sfd;
 
+	struct sockaddr_storage ss;
+	socklen_t ss_len = sizeof(ss);
+	if(getsockname(sfd, (struct sockaddr *)&ss, &ss_len) == -1){
+		info->rep = REP_GENFAIL;
+		close(sfd);
+		return 0;
+	}
+
 	info->rep = REP_SUCCESS;
 	uint8_t rep_info[3] = {0};
 	rep_info[0] = SOCKS5_VERSION;
@@ -313,11 +321,12 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 
 	uint8_t atype = 0;
 	if(af == AF_INET){
-		struct sockaddr_in *sa = (struct sockaddr_in *)advertise_addr;
+		struct sockaddr_in *sa = (struct sockaddr_in *)advertise_addr->sa;
+		struct sockaddr_in *port = (struct sockaddr_in *)&ss;
 		atype = ATYP_IPV4;
 		write_ringbuff(&shared->client_out, &atype, 1);
 		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin_addr, 4);
-		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin_port, 2);
+		write_ringbuff(&shared->client_out, (uint8_t *)&port->sin_port, 2);
 		if(ep_waiting_send(epoll_fd, shared->client_fd, shared->client_data) == -1){
 			info->rep = REP_GENFAIL;
 			return 0;
@@ -325,10 +334,11 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 	}
 	else if(af == AF_INET6){
 		struct sockaddr_in6 *sa = (struct sockaddr_in6 *)advertise_addr;
+		struct sockaddr_in6 *port = (struct sockaddr_in6 *)&ss;
 		atype = ATYP_IPV6;
 		write_ringbuff(&shared->client_out, &atype, 1);
 		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin6_addr, 16);
-		write_ringbuff(&shared->client_out, (uint8_t *)&sa->sin6_port, 2);
+		write_ringbuff(&shared->client_out, (uint8_t *)&port->sin6_port, 2);
 		if(ep_waiting_send(epoll_fd, shared->client_fd, shared->client_data) == -1){
 			info->rep = REP_GENFAIL;
 			return 0;

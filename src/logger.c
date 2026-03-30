@@ -34,10 +34,16 @@ const char *error_strings[] = {
 	"WARN|RESOLVERERROR-Failed to start the async dns resolver",
 	"INFO|NORESOLVER-Not starting resolver, not domain names allowed",
 	"EMERG|MALLOCERROR-Memory allocation operation failed",
-	"WARN|EPOLLERRORADD",
-	"WARN|EPOLLERRORMOD",
-	"WARN|EPOLLERRORDEL",
-	"INFO|BINDLISTENER",
+	"WARN|EPOLLERRORADD-Error adding fd to epoll",
+	"WARN|EPOLLERRORMOD-Error modifying fd in epoll",
+	"WARN|EPOLLERRORDEL-Error deleting fd from epoll",
+	"INFO|BINDLISTENER-Bound listener from config file",
+	"EMERG|EPOLLWAITERROR-There was an error waiting for epoll to return",
+	"WARN|EPOLLDATANULL-Epoll returned a null pointer",
+	"WARN|NEWCLIENTERROR-There was an error accepting a new client",
+	"WARN|NULLCHECKFAIL-Found NULL where data was expected",
+	"WARN|GETSOCKOPTFAIL-Error returned by getsockopt",
+	"WARN|GETSOCKNAMEFAIL-Error returned by getsockname",
 };
 
 const char *access_formats[] = {
@@ -186,11 +192,11 @@ void log_custom(char *str, uint8_t strsz, uint8_t file){
 		return;
 	}
 	memcpy(&msg[3], str, strsz);
-	write(logger.w_pipe, &msg, sizeof(msg));
+	write(logger.w_pipe, &msg, strsz + 3);
 }
 
 void log_error(uint8_t code){
-	uint8_t msg[3] = {0};
+	uint8_t msg[2] = {0};
 	msg[0] = LOG_ERROR;
 	msg[1] = code;
 	write(logger.w_pipe, &msg, sizeof(msg));

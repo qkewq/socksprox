@@ -277,6 +277,9 @@ int store_config(char *key, char *val, Configs *configs){
 	else if(strcmp(key, "allow-connect") == 0){
 		configs->allow_connect = yes_check(val);
 	}
+	else if(strcmp(key, "allow-bind") == 0){
+		configs->allow_bind = yes_check(val);
+	}
 	else if(strcmp(key, "allow-udp-associate") == 0){
 		configs->allow_udpassoc = yes_check(val);
 	}

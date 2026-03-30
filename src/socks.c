@@ -384,7 +384,7 @@ int connecting(int epoll_fd, Data *data, uint32_t ev){
 	int error = 0;
 	socklen_t errlen = sizeof(error);
 	if(getsockopt(data->self_fd, SOL_SOCKET, SO_ERROR, &error, &errlen) == -1){
-		log_error(L_GETESOCKOPTFAIL);
+		log_error(L_GETSOCKOPTFAIL);
 		data->shared->info->rep = REP_GENFAIL;
 		reply_with_err(epoll_fd, data);
 		return 0;
@@ -564,6 +564,7 @@ int bindlistening(int epoll_fd, Data *data, uint32_t ev){
 		return 0;
 	}
 
+	info->rep = REP_SUCCESS;
 	uint8_t rep_info[3] = {0};
 	rep_info[0] = SOCKS5_VERSION;
 	rep_info[1] = info->rep;
@@ -687,6 +688,7 @@ uint16_t socks5(int epoll_fd, struct epoll_event *event, Configs *configs){
 			break;
 		case STATE_SENDING_REPLY_2:
 			ret = sendingreply(epoll_fd, data, ev);
+			break;
 		case STATE_CONNECTING:
 			ret = connecting(epoll_fd, data, ev);
 			break;
@@ -698,6 +700,7 @@ uint16_t socks5(int epoll_fd, struct epoll_event *event, Configs *configs){
 			break;
 		case STATE_FULL_UDPA:
 			ret = full_udpa(epoll_fd, data, ev);
+			break;
 		case STATE_HALF_CLOSE:
 			ret = half_close(epoll_fd, data, ev);
 			break;

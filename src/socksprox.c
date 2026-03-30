@@ -37,6 +37,7 @@ int main(int argc, char *argv[]){
 	if(!events){
 		log_error(L_MALLOCERROR);
 		log_sig_join(logger_thread);
+		return 1;
 	}
 	if(epoll_fd == -1){
 		log_error(L_EPOLLERROR);
