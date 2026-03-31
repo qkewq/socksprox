@@ -16,6 +16,7 @@
 #include "config.h"
 #include "logger.h"
 #include "resolver.h"
+#include "firewall.h"
 
 int vercheck(uint8_t ver){
 	if(ver != SOCKS5_VERSION){
@@ -308,6 +309,12 @@ int waitingcommand(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
 
 	log_access(A_COMMAND, data->self_fd, info->cmd);
 
+	if(firewall(info, configs)){
+		info->rep = REP_RULESET;
+		reply_with_err(epoll_fd, data);
+		return 0;
+	}
+
 	init_command(epoll_fd, data, configs);
 
 	// If the init functions fail they will set info->rep and still return 0
@@ -339,11 +346,6 @@ int sendingreply(int epoll_fd, Data *data, uint32_t ev){
 	consume_ringbuff(&data->shared->client_out, peek);
 	log_access(A_SOCKSREPLY, data->self_fd, data->shared->info->rep);
 
-	if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
-		handshake_err(epoll_fd, data);
-		return 0;
-	}
-	int ret = ep_done_sending(epoll_fd, data->self_fd, data);
 	if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
 		handshake_err(epoll_fd, data);
 		return 0;
@@ -615,7 +617,8 @@ int closed(int epoll_fd, Data *data){
 }
 
 int half_close(int epoll_fd, Data *data, uint32_t ev){
-return -1;
+	data->shared->state = STATE_CLOSED;
+	return 0;
 }
 
 int full(int epoll_fd, Data *data, uint32_t ev){

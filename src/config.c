@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "firewall.h"
 
 int yes_check(char *val){
 	if(strcmp(val, "yes") == 0){
@@ -251,6 +252,16 @@ int link_blocks(struct addrinfo *ai, int mask, Blockaddr_ll **head){
 	if(!new_node || !sa){
 		return -1;
 	}
+
+	if(ai->ai_family == AF_INET){
+		struct sockaddr_in *sin  = (struct sockaddr_in *)ai->ai_addr;
+		mask_sin(&sin->sin_addr, mask);
+	}
+	else if(ai->ai_family == AF_INET6){
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ai->ai_addr;
+		mask_sin6(&sin6->sin6_addr, 16, mask);
+	}
+
 	memcpy(sa, ai->ai_addr, ai->ai_addrlen);
 	new_node->mask = mask;
 	new_node->sa = sa;
