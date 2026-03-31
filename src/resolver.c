@@ -102,7 +102,7 @@ int init_resolver(pthread_t *thread, int epoll_fd){
 	resolver.win_pipe = inpipe[1];
 
 	int outpipe[2];
-	if(pipe2(outpipe, (O_DIRECT | O_NONBLOCK)) == -1){
+	if(pipe2(outpipe, O_NONBLOCK) == -1){
 		return -1;
 	}
 

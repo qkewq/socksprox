@@ -333,7 +333,7 @@ int init_bind(int epoll_fd, Shared *shared, Configs *configs){
 		}
 	}
 	else if(af == AF_INET6){
-		struct sockaddr_in6 *sa = (struct sockaddr_in6 *)advertise_addr;
+		struct sockaddr_in6 *sa = (struct sockaddr_in6 *)advertise_addr->sa;
 		struct sockaddr_in6 *port = (struct sockaddr_in6 *)&ss;
 		atype = ATYP_IPV6;
 		write_ringbuff(&shared->client_out, &atype, 1);

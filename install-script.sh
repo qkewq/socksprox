@@ -2,30 +2,15 @@
 
 echo "Installing socksprox..."
 
-OPTSTRING=":hc:"
 CONFIG_FILE="/etc/socksprox.conf"
 
-while getopts ${OPTSRING} opt; do
-	case ${opt} in
-		h)
-			echo "Usage $0 [-h] [-c </path/to/config>]"
-			exit 0
-			;;
-		c)
-			CONFIG_FILE="$OPTARG"
-			echo "Changing default configs location to ${OPTARG}"
-			SED_STR="s|#define CONFIG_FILE .*|#define CONFIG_FILE \"${CONFIG_FILE}\"|g"
-			sed -i "${SED_STR}" include/config.h
-			;;
-		:)
-			echo "Option -${OPTARG} requires argument"
-			exit 0
-			;;
-	esac
-done
-
-echo "building socksprox"
+echo "Building socksprox with make"
 make
+
+if [ ! -f "build/socksprox" ]; then
+	echo "socksprox not found in build/socksprox"
+	exit 0
+fi
 
 if [ ! -x "build/socksprox" ]; then
 	echo "Making socksprox executable"
