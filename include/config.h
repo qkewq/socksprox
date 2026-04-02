@@ -20,7 +20,7 @@ typedef struct Sockaddr_ll{
 } Sockaddr_ll;
 
 typedef struct Blockaddr_ll{
-	Netmask netmask;
+	union Netmask netmask;
 	struct sockaddr *sa;
 	struct Blockaddr_ll *next;
 } Blockaddr_ll;
