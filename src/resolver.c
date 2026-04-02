@@ -62,7 +62,7 @@ void *resolver_th(void *arg){
 				continue;
 			}
 			char name[256] = {0};
-			int r_len = read(pfd.fd, &name, sizeof(name));
+			int r_len = read(pfd.fd, &name, name_len);
 			if(r_len != name_len){
 				continue;
 			}
@@ -118,9 +118,9 @@ int init_resolver(pthread_t *thread, int epoll_fd){
 
 void resolve(Shared *shared, char *input){
 	shared->state = STATE_ASYNC_DNS;
-	int name_len = 3 + input[0]; // 3 bytes fixed + variable
-	uint8_t msg[sizeof(shared) + name_len];
+	int name_len = input[0]; // 3 bytes fixed + variable
+	uint8_t msg[sizeof(shared) + name_len + 3];
 	memcpy(msg, &shared, sizeof(shared));
-	memcpy(&msg[1 + sizeof(shared)], input, name_len);
+	memcpy(&msg[1 + sizeof(shared)], input, name_len + 3);
 	write(resolver.win_pipe, &msg, sizeof(msg));
 }

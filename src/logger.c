@@ -106,7 +106,7 @@ void *logger_th(void *arg){
 			while(1){
 				uint8_t log_type = 0xFF;
 				uint8_t code = 0xFF;
-				int read_ret = read(pfd.fd, &log_type, sizeof(log_type)) < sizeof(log_type);
+				int read_ret = read(pfd.fd, &log_type, sizeof(log_type));
 				if(read_ret == -1){
 					if(errno == EAGAIN || EWOULDBLOCK){
 						break;
@@ -214,4 +214,5 @@ void log_access(uint8_t code, int client_fd, int server_fd){
 void log_sig_join(pthread_t logger_thread){
 	uint8_t msg = LOG_SIG_JOIN;
 	write(logger.w_pipe, &msg, sizeof(msg));
+	pthread_join(logger_thread, NULL);
 }
