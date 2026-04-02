@@ -252,18 +252,21 @@ int link_blocks(struct addrinfo *ai, int mask, Blockaddr_ll **head){
 	if(!new_node || !sa){
 		return -1;
 	}
+	memset(new_node, 0, sizeof(Blockaddr_ll));
+	memset(sa, 0, sizeof(struct sockaddr_storage));
+
+	firewall_iton(&new_node->netmask, ai->ai_family, mask);
 
 	if(ai->ai_family == AF_INET){
 		struct sockaddr_in *sin  = (struct sockaddr_in *)ai->ai_addr;
-		mask_sin(&sin->sin_addr, mask);
+		mask_sin((uint32_t *)&sin->sin_addr.s_addr, &new_node->netmask.inet);
 	}
 	else if(ai->ai_family == AF_INET6){
 		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ai->ai_addr;
-		mask_sin6(&sin6->sin6_addr, 16, mask);
+		mask_sin6(sin6->sin6_addr.s6_addr, 16, new_node->netmask.inet6);
 	}
 
 	memcpy(sa, ai->ai_addr, ai->ai_addrlen);
-	new_node->mask = mask;
 	new_node->sa = sa;
 	new_node->next = *head;
 	*head = new_node;

@@ -8,6 +8,11 @@
 #define METH_USERPW 0x02
 #define METH_NOMETH 0xFF
 
+typedef union Netmask{
+	uint32_t inet;
+	uint8_t inet6[16];
+} Netmask;
+
 typedef struct Sockaddr_ll{
 	struct Sockaddr_ll *next;
 	int addrlen;
@@ -15,7 +20,7 @@ typedef struct Sockaddr_ll{
 } Sockaddr_ll;
 
 typedef struct Blockaddr_ll{
-	int mask;
+	Netmask netmask;
 	struct sockaddr *sa;
 	struct Blockaddr_ll *next;
 } Blockaddr_ll;
