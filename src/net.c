@@ -69,7 +69,9 @@ int listen_err(int epoll_fd, uint32_t ev, Data *data){
 }
 
 int accept_new_client(int epoll_fd, int fd){
-	int new_fd = accept(fd, NULL, NULL);
+	struct sockaddr_storage ss;
+	socklen_t ss_len = sizeof(ss);
+	int new_fd = accept(fd, (struct sockaddr *)&ss, &ss_len);
 	if(new_fd == -1){
 		return -1;
 	}
@@ -99,9 +101,27 @@ int accept_new_client(int epoll_fd, int fd){
 		return -1;
 	}
 
+	Alog *access = malloc(sizeof(Alog));
+	struct sockaddr_storage *ss_client = malloc(sizeof(struct sockaddr_storage));
+	struct sockaddr_storage *ss_server = malloc(sizeof(struct sockaddr_storage));
+	if(!access || !ss_client || !ss_server){
+		close(new_fd);
+		free(data);
+		free(shared);
+		free(info);
+		free(access);
+		free(ss_client);
+		free(ss_server);
+		log_error(L_MALLOCERROR);
+		return -1;
+	}
+
 	memset(data, 0, sizeof(Data));
 	memset(shared, 0, sizeof(Shared));
 	memset(info, 0, sizeof(Info));
+	memset(access, 0, sizeof(Alog));
+	memset(ss_client, 0, sizeof(struct sockaddr_storage));
+	memset(ss_server, 0, sizeof(struct sockaddr_storage));
 	data->type = TYPE_PEER;
 	data->self_fd = new_fd;
 	data->shared = shared;
@@ -117,6 +137,10 @@ int accept_new_client(int epoll_fd, int fd){
 	shared->client_flags = 0;
 	shared->server_flags = 0;
 	shared->ptr = NULL;
+	shared->access = access;
+	access->client = ss_client;
+	access->server = ss_server;
+	memcpy(access->client, &ss, sizeof(ss));
 	shared->info = info;
 	info->method = 0xFF;
 	info->rep = 0x0FF;
@@ -135,6 +159,9 @@ int accept_new_client(int epoll_fd, int fd){
 		free(shared);
 		free(data);
 		free(info);
+		free(access);
+		free(ss_client);
+		free(ss_server);
 		log_error(L_MALLOCERROR);
 		return -1;
 	}
@@ -147,10 +174,13 @@ int accept_new_client(int epoll_fd, int fd){
 		free(shared->server_out.buff);
 		free(shared);
 		free(info);
+		free(access);
+		free(ss_client);
+		free(ss_server);
 		return -1;
 	}
 
-	log_access(A_ACCEPTNEWCLIENT, new_fd, NULLFD);
+	log_access(shared->access, A_ACCEPTNEWCLIENT);
 	return 0;
 }
 

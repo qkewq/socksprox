@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <poll.h>
+#include <arpa/inet.h>
 
 #include "logger.h"
 #include "config.h"
@@ -47,9 +48,20 @@ const char *error_strings[] = {
 };
 
 const char *access_formats[] = {
-	"",
-	"",
-	"",
+	"[%s]:%d-->socksprox|A new client connected to socksprox",
+	"[%s]:%d--!socksprox|Connection closing during socks handshake",
+	"[%s]:%d--!socksprox|Client sent invalid version during handshake",
+	"[%s]:%d-->socksprox|Client requested command 'connect'",
+	"[%s]:%d-->socksprox|Client requested command 'bind'",
+	"[%s]:%d-->socksprox|Client requested command 'udp associate'",
+	"[%s]:%d--!socksprox|Client requst blocked by firewall",
+	"[%s]:%d-->socksprox|Method negotiated to 'no authentication'",
+	"[%s]:%d-->socksprox|Method negotiated to 'username/password'",
+	"[%s]:%d-->socksprox|Method negotiated to 'gssapi'",
+	"[%s]:%d--!socksprox|No method could be negotiated",
+	"[%s]:%d-->socksprox-->[%s]:%d|Successful proxy connection made",
+	"[%s]:%d-->socksprox<--[%s]:%d|Peer connected to proxied listener",
+	"[%s]:%d-->socksprox<->[%s]:%d|UDP relay port established",
 };
 
 int write_custom(char *str, FILE *file, struct tm *t){
@@ -66,8 +78,35 @@ int write_error(uint8_t code, FILE *file, struct tm *t){
 	return 0;
 }
 
-int write_access(uint8_t code, int client_fd, int server_fd, FILE *file, struct tm *t){
-// dang
+int get_ip_port(char *ip_dst, int ip_dst_sz, uint16_t *port_dst, struct sockaddr_storage *src){
+	if(src->ss_family == AF_INET){
+		struct sockaddr_in *sin = (struct sockaddr_in *)src;
+		inet_ntop(AF_INET, sin, ip_dst, ip_dst_sz);
+		*port_dst = sin->sin_port;
+	}
+	else if(src->ss_family == AF_INET6){
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)src;
+		inet_ntop(AF_INET6, sin6, ip_dst, ip_dst_sz);
+		*port_dst = sin6->sin6_port;
+	}
+
+	return 0;
+}
+
+int write_access(Alog *access, FILE *file, struct tm *t){
+	char client_ip[40] = {0};
+	char server_ip[40] = {0};
+	uint16_t client_port;
+	uint16_t server_port;
+	get_ip_port(client_ip, sizeof(client_ip), &client_port, access->client);
+	if(access->server->ss_family != 0){
+		get_ip_port(server_ip, sizeof(server_ip), &server_port, access->server);
+	}
+
+	fprintf(file, "%d-%d-%d_%d:%d:%d-", t->tm_year + 1900, t->tm_mon + 1,
+			t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+	fprintf(file, access_formats[access->code], client_ip, client_port, server_ip, server_port);
+	fprintf(file, "\n");
 
 	return 0;
 }
@@ -144,18 +183,17 @@ void *logger_th(void *arg){
 						break;
 					}
 					case LOG_ACCESS:{
-						if(read(pfd.fd, &code, sizeof(code)) < sizeof(code)){
-							break;
-						}
-						int client_fd = 0;
-						int server_fd = 0;
-						if(read(pfd.fd, &client_fd, sizeof(client_fd)) < sizeof(client_fd)){
-							break;
-						}
-						if(read(pfd.fd, &server_fd, sizeof(server_fd)) < sizeof(server_fd)){
-							break;
-						}
-						write_access(code, client_fd, server_fd, log_files[FILE_ACCESS], &t);
+						struct sockaddr_storage ss_access[2];
+						memset(&ss_access[0], 0, sizeof(ss_access[0]));
+						memset(&ss_access[1], 0, sizeof(ss_access[1]));
+						Alog access;
+						memset(&access, 0, sizeof(Alog));
+						access.client = &ss_access[0];
+						access.server = &ss_access[1];
+						read(pfd.fd, &access.code, sizeof(access.code));
+						read(pfd.fd, &ss_access[0], sizeof(ss_access[0]));
+						read(pfd.fd, &ss_access[1], sizeof(ss_access[1]));
+						write_access(&access, log_files[FILE_ACCESS], &t);
 						break;
 					}
 					case LOG_SIG_JOIN:{
@@ -202,12 +240,12 @@ void log_error(uint8_t code){
 	write(logger.w_pipe, &msg, sizeof(msg));
 }
 
-void log_access(uint8_t code, int client_fd, int server_fd){
-	uint8_t msg[2 + (sizeof(int) * 2)] = {0};
+void log_access(Alog *access, uint8_t code){
+	uint8_t msg[1 + sizeof(access->code) + (sizeof(struct sockaddr_storage) * 2)] = {0};
 	msg[0] = LOG_ACCESS;
 	msg[1] = code;
-	memcpy(&msg[2], &client_fd, sizeof(int));
-	memcpy(&msg[2 + sizeof(int)], &server_fd, sizeof(int));
+	memcpy(&msg[2], access->client, sizeof(*access->client));
+	memcpy(&msg[2 + sizeof(*access->client)], access->server, sizeof(*access->server));
 	write(logger.w_pipe, &msg, sizeof(msg));
 }
 

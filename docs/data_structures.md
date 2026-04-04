@@ -48,11 +48,12 @@ typedef struct Shared{
 	struct Data *server_data;
 	uint8_t client_flags;
 	uint8_t server_flags;
+	struct Alog *access;
 	struct Info *info;
 	void *ptr;
 } Shared;
 ```
-The state field is the most important field as it tracks the state of the connection throughout the handshake and proxy process ([See States](state_machine.md)).  The other fields contain both client and server (the proxied connection) file descriptors and pointers to their respective `Data structs`.  It also contains pointers to their output buffers ([See Ringbuffs](#ringbuff)) and a pointer to the shared `Info struct` ([See Info](#info)).  The `server_out` field acts as a temporary input buffer for the client during the socks handshake.  The client and server flags are used to track TCP half close states.  The void pointer `ptr` is unused.
+The state field is the most important field as it tracks the state of the connection throughout the handshake and proxy process ([See States](state_machine.md)).  The other fields contain both client and server (the proxied connection) file descriptors and pointers to their respective `Data structs`.  It also contains pointers to their output buffers ([See Ringbuffs](#ringbuff)) and a pointer to the shared `Info struct` ([See Info](#info)).  The `access` field is a pointer to an `Alog` struct wich contains the IP and port of the client and proxied connection, this is given to the logger to write access logs.  The `server_out` field acts as a temporary input buffer for the client during the socks handshake.  The client and server flags are used to track TCP half close states.  The void pointer `ptr` is used for authentication method spceific data.
 |Flag|Note|
 |--|--|
 |FLAG_READ_CLOSED (`0x01`)|This side of the connection recieved `EOF`|

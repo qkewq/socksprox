@@ -26,6 +26,8 @@
 #define FLAG_WRITE_CLOSED       0x02
 #define FLAG_FLUSHING           0x04
 
+typedef struct Alog Alog;
+
 typedef struct Info{
 	uint8_t method;
 	uint8_t rep;
@@ -55,6 +57,7 @@ typedef struct Shared{
 	struct Data *server_data;
 	uint8_t client_flags;
 	uint8_t server_flags;
+	struct Alog *access;
 	struct Info *info;
 	void *ptr;
 } Shared;

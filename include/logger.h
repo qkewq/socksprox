@@ -27,11 +27,17 @@
 #define A_ACCEPTNEWCLIENT   0x00
 #define A_CLOSEHANDSHAKE    0x01
 #define A_VERSIONFAIL       0x02
-#define A_AUTHNOAUTH        0x03
-#define A_BADMETHOD         0x04
-#define A_ASYNCDNS          0x05
-#define A_COMMAND           0x06
-#define A_SOCKSREPLY        0x07
+#define A_COMMCONN          0x03
+#define A_COMMBIND          0x04
+#define A_COMMUDPA          0x05
+#define A_FIREWALLDROP      0x06
+#define A_METHNOAUTH        0x07
+#define A_METHUSERPASS      0x08
+#define A_METHGSSAPI        0x09
+#define A_METHNOMETH        0x0A
+#define A_CONNECTED         0x0B
+#define A_BINDCONNECTED     0x0C
+#define A_ASSOCIATED        0x0D
 
 typedef struct Configs Configs;
 
@@ -42,12 +48,18 @@ typedef struct Logger{
 	int w_pipe;
 } Logger;
 
+typedef struct Alog{
+	uint8_t code;
+	struct sockaddr_storage *client;
+	struct sockaddr_storage *server;
+} Alog;
+
 extern Logger logger;
 
 int init_logger(pthread_t *thread, Configs *configs);
 void log_custom(char *str, uint8_t strsz, uint8_t file);
 void log_error(uint8_t code);
-void log_access(uint8_t code, int client_fd, int server_fd);
+void log_access(Alog *access, uint8_t code);
 void log_sig_join(pthread_t logger_thread);
 
 #endif

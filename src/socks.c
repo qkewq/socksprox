@@ -26,7 +26,7 @@ int vercheck(uint8_t ver){
 }
 
 int handshake_err(int epoll_fd, Data *data){
-	log_access(A_CLOSEHANDSHAKE, data->self_fd, NULLFD);
+	log_access(data->shared->access, A_CLOSEHANDSHAKE);
 	data->shared->state = STATE_CLOSED;
 	ep_delete_fd(epoll_fd, data->self_fd);
 	close(data->self_fd);
@@ -61,6 +61,7 @@ int init_command(int epoll_fd, Data *data, Configs *configs){
 	Info *info = data->shared->info;
 	switch(info->cmd){
 		case CMD_CONN:
+			log_access(data->shared->access, A_COMMCONN);
 			if(!configs->allow_connect){
 				info->rep = REP_BADCOMM;
 				reply_with_err(epoll_fd, data);
@@ -69,6 +70,7 @@ int init_command(int epoll_fd, Data *data, Configs *configs){
 			init_connect(epoll_fd, data->shared);
 			break;
 		case CMD_BIND:
+			log_access(data->shared->access, A_COMMBIND);
 			if(!configs->allow_bind){
 				info->rep = REP_BADCOMM;
 				reply_with_err(epoll_fd, data);
@@ -77,6 +79,7 @@ int init_command(int epoll_fd, Data *data, Configs *configs){
 			init_bind(epoll_fd, data->shared, configs);
 			break;
 		case CMD_UDPA:
+			log_access(data->shared->access, A_COMMUDPA);
 			if(!configs->allow_udpassoc){
 				info->rep = REP_BADCOMM;
 				reply_with_err(epoll_fd, data);
@@ -128,7 +131,7 @@ int waitingmethods(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
 	consume_ringbuff(&data->shared->server_out, sizeof(version) + sizeof(nmethods));
 
 	if(vercheck(version)){
-		log_access(A_VERSIONFAIL, data->self_fd, version);
+		log_access(data->shared->access, A_VERSIONFAIL);
 		handshake_err(epoll_fd, data);
 		return 0;
 	}
@@ -182,15 +185,22 @@ int sendingmethod(int epoll_fd, Data *data, uint32_t ev){
 
 	switch(data->shared->info->method){
 		case METH_NOAUTH:
-			log_access(A_AUTHNOAUTH, data->self_fd, NULLFD);
+			log_access(data->shared->access, A_METHNOAUTH);
 			data->shared->state = STATE_WAITING_COMMAND;
 			break;
+		case METH_USERPW:
+			log_access(data->shared->access, A_METHUSERPASS);
+			handshake_err(epoll_fd, data);
+			break;
+		case METH_GSSAPI:
+			log_access(data->shared->access, A_METHGSSAPI);
+			handshake_err(epoll_fd, data);
+			break;
 		case METH_NOMETH:
-			log_access(A_BADMETHOD, data->self_fd, NULLFD);
+			log_access(data->shared->access, A_METHNOMETH);
 			handshake_err(epoll_fd, data);
 			break;
 		default:
-			log_access(A_BADMETHOD, data->self_fd, NULLFD);
 			handshake_err(epoll_fd, data);
 			break;
 	}
@@ -267,7 +277,7 @@ int waitingcommand(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
 	info->atyp = addrtype;
 
 	if(vercheck(req[0])){
-		log_access(A_VERSIONFAIL, data->self_fd, req[0]);
+		log_access(data->shared->access, A_VERSIONFAIL);
 		handshake_err(epoll_fd, data);
 		return 0;
 	}
@@ -287,7 +297,6 @@ int waitingcommand(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
 			break;
 		}
 		case ATYP_DOMN:{
-			log_access(A_ASYNCDNS, data->self_fd, NULLFD);
 			data->shared->state = STATE_ASYNC_DNS;
 			resolve(data->shared, &req[4]);
 			return 0;
@@ -307,9 +316,9 @@ int waitingcommand(int epoll_fd, Data *data, Configs *configs, uint32_t ev){
 		}
 	}
 
-	log_access(A_COMMAND, data->self_fd, info->cmd);
 
 	if(firewall(info, configs)){
+		log_access(data->shared->access, A_FIREWALLDROP);
 		info->rep = REP_RULESET;
 		reply_with_err(epoll_fd, data);
 		return 0;
@@ -344,7 +353,6 @@ int sendingreply(int epoll_fd, Data *data, uint32_t ev){
 	}
 
 	consume_ringbuff(&data->shared->client_out, peek);
-	log_access(A_SOCKSREPLY, data->self_fd, data->shared->info->rep);
 
 	if(ep_done_sending(epoll_fd, data->self_fd, data) == -1){
 		handshake_err(epoll_fd, data);
@@ -359,6 +367,7 @@ int sendingreply(int epoll_fd, Data *data, uint32_t ev){
 
 	switch(info->cmd){
 		case CMD_CONN:
+			log_access(data->shared->access, A_CONNECTED);
 			data->shared->state = STATE_FULL;
 			break;
 		case CMD_BIND:
@@ -367,6 +376,7 @@ int sendingreply(int epoll_fd, Data *data, uint32_t ev){
 				data->shared->state = STATE_BIND_LISTENING;
 			}
 			else if(data->shared->state == STATE_SENDING_REPLY_2){
+				log_access(data->shared->access, A_BINDCONNECTED);
 				data->shared->state = STATE_FULL;
 			}
 			break;
@@ -405,6 +415,8 @@ int connecting(int epoll_fd, Data *data, uint32_t ev){
 			reply_with_err(epoll_fd, data);
 			return 0;
 		}
+
+		memcpy(data->shared->access->server, &ss, sizeof(ss));
 
 		uint8_t rep_info[3] = {0};
 		rep_info[0] = SOCKS5_VERSION;
@@ -507,6 +519,8 @@ int bindlistening(int epoll_fd, Data *data, uint32_t ev){
 		reply_with_err(epoll_fd, data);
 		return 0;
 	}
+
+	memcpy(data->shared->access->server, &ss, sizeof(ss));
 
 	struct sockaddr *req_addr = NULL;
 	if(info->sa){
